@@ -29,6 +29,10 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        
+        // 初始化通知渠道（只需在应用启动时调用一次）
+        com.GXR806.envhealth.notification.NotificationHelper.createNotificationChannels(this)
+        
         setContent {
             环境健康Theme {
                 EnvHealthApp()
@@ -64,16 +68,29 @@ private fun EnvHealthApp() {
 
 @Composable
 private fun PlaceholderPage(title: String, modifier: Modifier = Modifier) {
-    Column(
-        modifier = modifier.fillMaxSize(),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
-    ) {
-        Text(text = title, style = MaterialTheme.typography.headlineMedium)
-        Text(
-            text = "功能将在后续阶段实现",
-            modifier = Modifier.padding(top = 8.dp),
-            style = MaterialTheme.typography.bodyMedium,
-        )
+    when (title) {
+        "首页" -> {
+            // 首页使用真实的 HomeScreen
+            com.GXR806.envhealth.ui.screen.HomeScreen(modifier = modifier)
+        }
+        "环境监测" -> {
+            // 环境监测页使用真实的 MonitorScreen
+            com.GXR806.envhealth.ui.screen.MonitorScreen(modifier = modifier)
+        }
+        else -> {
+            // 其他页面仍为占位
+            Column(
+                modifier = modifier.fillMaxSize(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+            ) {
+                Text(text = title, style = MaterialTheme.typography.headlineMedium)
+                Text(
+                    text = "功能将在后续阶段实现",
+                    modifier = Modifier.padding(top = 8.dp),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+        }
     }
 }

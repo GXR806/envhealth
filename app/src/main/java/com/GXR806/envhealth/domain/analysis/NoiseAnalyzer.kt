@@ -1,0 +1,208 @@
+package com.GXR806.envhealth.domain.analysis
+
+import com.GXR806.envhealth.data.sensor.audio.NoiseFrame
+import com.GXR806.envhealth.domain.model.NoiseLevel
+import com.GXR806.envhealth.util.Constants
+import com.GXR806.envhealth.util.LogX
+import kotlin.math.log10
+import kotlin.math.pow
+import kotlin.math.sqrt
+
+/**
+ * 噪音分析器
+ *
+ * 功能：
+ * - 滑动窗口统计：Leq（1s/1min）、L10、L90
+ * - 突发噪声事件检测
+ * - NoiseLevel 分级
+ */
+class NoiseAnalyzer {
+    companion object {
+        private const val TAG = "NoiseAnalyzer"
+        
+        // 窗口大小
+        private const val WINDOW_SIZE_1S = 10  // 10 帧 = 1 秒
+        private const val WINDOW_SIZE_1MIN = 600  // 600 帧 = 1 分钟
+        
+        // 突发噪声检测阈值
+        private val BURST_THRESHOLD = Constants.Audio.BURST_NOISE_THRESHOLD
+    }
+
+    // 滑动窗口（存储最近的帧）
+    private val frames1s = ArrayDeque<NoiseFrame>(WINDOW_SIZE_1S)
+    private val frames1min = ArrayDeque<NoiseFrame>(WINDOW_SIZE_1MIN)
+
+    // 上一帧（用于突发检测）
+    private var lastFrame: NoiseFrame? = null
+
+    /**
+     * 添加新的噪音帧进行分析
+     *
+     * @param frame 噪音帧
+     * @return 分析结果
+     */
+    fun analyze(frame: NoiseFrame): NoiseAnalysisResult {
+        // 添加到滑动窗口
+        addFrame(frame)
+
+        // 计算统计指标
+        val leq1s = calculateLeq(frames1s)
+        val leq1min = calculateLeq(frames1min)
+        val l10 = calculatePercentile(frames1min, 0.10)
+        val l90 = calculatePercentile(frames1min, 0.90)
+
+        // 检测突发噪声
+        val isBurst = detectBurst(frame)
+
+        // 判断噪音等级
+        val level = classifyNoiseLevel(frame.dbA)
+
+        return NoiseAnalysisResult(
+            timestamp = frame.timestamp,
+            currentDb = frame.dbA,
+            leq1s = leq1s,
+            leq1min = leq1min,
+            l10 = l10,
+            l90 = l90,
+            isBurst = isBurst,
+            level = level
+        )
+    }
+
+    /**
+     * 添加帧到滑动窗口
+     */
+    private fun addFrame(frame: NoiseFrame) {
+        // 1秒窗口
+        if (frames1s.size >= WINDOW_SIZE_1S) {
+            frames1s.removeFirst()
+        }
+        frames1s.addLast(frame)
+
+        // 1分钟窗口
+        if (frames1min.size >= WINDOW_SIZE_1MIN) {
+            frames1min.removeFirst()
+        }
+        frames1min.addLast(frame)
+    }
+
+    /**
+     * 计算等效连续声级 Leq
+     *
+     * Leq = 10 * log10( (1/N) * Σ(10^(Li/10)) )
+     *
+     * @param frames 帧列表
+     * @return Leq (dB)
+     */
+    private fun calculateLeq(frames: Collection<NoiseFrame>): Float {
+        if (frames.isEmpty()) return 0f
+
+        var sum = 0.0
+        for (frame in frames) {
+            sum += 10.0.pow(frame.dbA / 10.0)
+        }
+
+        val mean = sum / frames.size
+        return (10.0 * log10(mean)).toFloat()
+    }
+
+    /**
+     * 计算百分位数 Ln
+     *
+     * L10: 有 10% 的时间超过该值（较吵的部分）
+     * L90: 有 90% 的时间超过该值（较安静的部分）
+     *
+     * @param frames 帧列表
+     * @param percentile 百分位（0.0 - 1.0）
+     * @return Ln (dB)
+     */
+    private fun calculatePercentile(frames: Collection<NoiseFrame>, percentile: Double): Float {
+        if (frames.isEmpty()) return 0f
+
+        val sorted = frames.map { it.dbA }.sorted()
+        val index = ((1.0 - percentile) * sorted.size).toInt().coerceIn(0, sorted.size - 1)
+        return sorted[index]
+    }
+
+    /**
+     * 检测突发噪声事件
+     *
+     * 条件：相邻帧差值 > 15dB 且超过阈值
+     *
+     * @param currentFrame 当前帧
+     * @return 是否为突发噪声
+     */
+    private fun detectBurst(currentFrame: NoiseFrame): Boolean {
+        val last = lastFrame
+        lastFrame = currentFrame
+
+        if (last == null) return false
+
+        // 计算相邻帧差值
+        val delta = currentFrame.dbA - last.dbA
+
+        // 判断是否为突发噪声
+        val isBurst = delta > BURST_THRESHOLD && currentFrame.dbA > Constants.NoiseThreshold.NORMAL_MAX
+
+        if (isBurst) {
+            LogX.i(TAG, "检测到突发噪声: ${currentFrame.dbA} dB (Δ = $delta dB)")
+        }
+
+        return isBurst
+    }
+
+    /**
+     * 判断噪音等级
+     *
+     * @param dbA A 计权声压级 (dB)
+     * @return 噪音等级
+     */
+    private fun classifyNoiseLevel(dbA: Float): NoiseLevel {
+        return when {
+            dbA < Constants.NoiseThreshold.QUIET_MAX -> NoiseLevel.QUIET
+            dbA < Constants.NoiseThreshold.NORMAL_MAX -> NoiseLevel.NORMAL
+            dbA < Constants.NoiseThreshold.MODERATE_MAX -> NoiseLevel.MODERATE
+            dbA < 80f -> NoiseLevel.LOUD
+            else -> NoiseLevel.VERY_LOUD
+        }
+    }
+
+    /**
+     * 重置分析器状态
+     */
+    fun reset() {
+        frames1s.clear()
+        frames1min.clear()
+        lastFrame = null
+        LogX.i(TAG, "分析器状态已重置")
+    }
+}
+
+/**
+ * 噪音分析结果
+ */
+data class NoiseAnalysisResult(
+    /** 时间戳 */
+    val timestamp: Long,
+    
+    /** 当前分贝值（A 计权） */
+    val currentDb: Float,
+    
+    /** 1秒等效连续声级 */
+    val leq1s: Float,
+    
+    /** 1分钟等效连续声级 */
+    val leq1min: Float,
+    
+    /** L10: 有 10% 的时间超过该值 */
+    val l10: Float,
+    
+    /** L90: 有 90% 的时间超过该值 */
+    val l90: Float,
+    
+    /** 是否为突发噪声 */
+    val isBurst: Boolean,
+    
+    /** 噪音等级 */
+    val level: NoiseLevel
+)

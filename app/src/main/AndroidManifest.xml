@@ -35,6 +35,13 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- 环境监测前台服务 -->
+        <service
+            android:name=".service.EnvMonitorService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="microphone|camera" />
     </application>
 
 </manifest>
