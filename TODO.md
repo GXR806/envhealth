@@ -1,5 +1,27 @@
 # 环境健康 - 项目开发清单
 
+## 最新授权阶段：设置/提醒/维护闭环
+- [x] SettingsViewModel/SettingsScreen/Main首页入口，Activity范围VM、阈值/校准/原子静默时段、校验、确认清除
+- [x] 后台默认false，明确授权后手动开始；开启不自动采集；关闭立即停止await；服务非sticky/generation阻断旧启动
+- [x] DataMaintenance可重入clearMutex/gate、持久clearing/error、stop/join在gate外、全Room表清除/reset后台false/缓存generation/恢复仅cleanup
+- [x] 服务共用AppContainer Room，录音/噪音分析/save及光照frame/save/sampling全部join，Main解绑后IO等待executor结束
+- [x] 报告会话→报告→建议链maintenance gate与旧generation拒写、缓存清空；必要取消重抛，不改P5算法/旧失败断言
+- [x] ReminderPolicy专项9通过、维护专项4通过、P6专项6通过（合计19）
+- [x] 通知先持久节流claim后notify；预检查权限/频道、false回滚、未知结果防重复，分母仅已发送并保存事件；BOOT只任务
+- [x] backup/data extraction排除database/datastore/sharedpref
+- [x] 新增仅批准androidTest work-testing2.9.1；隔离Runner/WorkerFactory/runtime/Room/DataStore/clock/sink，原NoiseSampleDaoTest改runBlocking
+- [x] assembleDebug与assembleDebugAndroidTest编译成功
+- [~] 全套单测61通过/0跳过/4失败，仅原有AdviceEngineTest旧阈值/去重断言
+- [~] ReminderIntegrationTest仍7项，扩展fake sink跨午夜/白天silent断言及cancelAndJoin旧owner后新scope同临时文件重开持久化、反馈/节流/MUTE七天边界/重放；已编译，未执行仪器测试（此前connectedDebugAndroidTest失败No connected devices!）
+- [x] README/AGENT/TODO与测试/安全范围artifact交接
+- [ ] 设备：首页/设置入口与Back、阈值范围与重启持久、静默跨午夜/全天、后台授权手动开始/关闭await
+- [ ] 设备：实时校准、服务停止AudioRecord/CameraX/耳机回调和最终写入、重复停止/启动竞态
+- [ ] 设备：并发报告与清除、清除重入/失败重试/杀进程维护恢复、旧VM/耳机pending/历史缓存不复活
+- [ ] 设备：TestDriver仪器集成测试、提醒24h/反馈/权限/频道/静默、私有通知动作读回/OEM/8s超时
+- [ ] 设备：BOOT仅任务/后台false仅cleanup、Room7/90天边界级联保护、备份/设备转移排除
+
+
+
 ## P0: 项目脚手架与基础配置 ✅
 - [x] 初始化 Android Studio 项目（Kotlin + Jetpack Compose）
 - [x] 配置 Material 3 主题
@@ -60,7 +82,7 @@
 - [x] VolumeMonitor（AudioManager、ContentObserver、AudioDeviceCallback、5s音量/30s播放轮询）
 - [x] HeadphoneUsageTracker（单调计时、暂停排除、2min超时、加权音量、区间持久化）
 - [x] RiskEvaluator（四级、多原因、严格大于阈值）
-- [x] HeadphoneRepository/DAO 已完成区间查询，沿用 schema v1 无迁移
+- [x] HeadphoneRepository/DAO 已完成区间查询；“沿用 schema v1 无迁移”为 P6 历史记录，当前实际 schema v3，本阶段未改变数据库版本
 - [x] AppContainer 与 EnvMonitorService 生命周期接入、用户手动启动/停止
 - [x] P6 生命周期红线修正：停止/销毁无 main runBlocking；Main 立即注销/CameraX解绑，IO释放AudioRecord及最后落库，独立短生命周期scope完成后cancel；共享停止信号/Main串行清理/停止期间禁止重启
 - [x] 修正后重新 assembleDebug 成功、P6专项 6 passed/0 skipped/0 failed（不代表生命周期真机验收）
@@ -74,11 +96,12 @@
 - [ ] 首页/耳机页/通知停止后落库、注销监听、后台资源释放
 - [ ] 无耳机/未启动/数据库错误状态设备验证
 
-## P7: 数据保留策略（待实现）
-- [ ] 实现 DataRetentionWorker（WorkManager）
-- [ ] 原始采样数据：保留 7 天
-- [ ] 聚合报告与记录：保留 90 天
-- [ ] 定期清理策略
+## P7: 数据保留策略（代码完成，设备验收待进行）
+- [x] 唯一ReminderWorker兼顾保留清理（不新增重复Worker）
+- [x] 特征采样7天，聚合会话/报告/建议/耳机区间90天，24h清理节流
+- [x] DAO严格截止边界，保护未结束记录，报告外键cascade
+- [~] 专项纯策略测试通过，Room仪器测试已编译但无设备执行
+- [ ] 设备WorkManager实际调度与保留验收
 
 ## P8: 自动睡眠判定（可选）
 - [ ] 前台服务周期性检查（每 5 分钟）
@@ -88,7 +111,7 @@
 ## P9: 高级功能与优化（待定）
 - [ ] 数据导出功能
 - [ ] 历史报告查看
-- [ ] 设置页面（采集频率、保留期限等）
+- [~] 设置页面已实现（阈值/静默/校准/后台/清除），设备验收待进行；采集频率/保留期限不扩展
 - [ ] 应用图标与启动页
 - [ ] 性能优化与内存管理
 
@@ -104,7 +127,7 @@
 ---
 
 **当前版本**: v1.4  
-**最后更新**: P6代码及专项测试完成；全套测试4项旧断言失败，设备未验证
-**下一步**: P6设备验收；P7/P8须另行授权
+**最后更新**: 本轮设置/提醒/维护闭环代码及测试已编译；专项19通过，全套61通过/4项旧失败；No connected devices，仪器与设备未验收
+**下一步**: 连接设备完成本轮及P6清单；P8/其他扩展须另行授权
 
 勾选标准：[x] 已实现且相关自动化已过；[~] 部分完成或存在验证阻塞；[ ] 未实现/未验证。P0-P5沿用原验收记录，不代表本次全套自动化全绿。

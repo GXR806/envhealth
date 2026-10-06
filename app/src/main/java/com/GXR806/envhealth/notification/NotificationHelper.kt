@@ -28,6 +28,8 @@ object NotificationHelper {
 
         /** 健康提醒渠道（高优先级） */
         const val HEALTH_ALERT = "channel_health_alert"
+        /** 独立静默渠道，不借普通高优先渠道绕过免打扰。 */
+        const val HEALTH_SILENT = "channel_health_silent"
     }
 
     /**
@@ -81,9 +83,72 @@ object NotificationHelper {
                 enableLights(true)
             }
 
-            notificationManager.createNotificationChannels(listOf(monitorChannel, healthAlertChannel))
+            val silentChannel = NotificationChannel(ChannelId.HEALTH_SILENT,
+                "静默健康提醒", NotificationManager.IMPORTANCE_LOW).apply {
+                description = "睡眠免打扰期间的健康提醒，无声音与振动"
+                setSound(null, null)
+                enableVibration(false)
+                enableLights(false)
+            }
+            notificationManager.createNotificationChannels(listOf(monitorChannel, healthAlertChannel, silentChannel))
             LogX.i("NotificationHelper", "通知渠道创建成功")
         }
+    }
+
+    /** 发送已校验事件，返回实际 notify 是否成功；权限/系统/频道关闭不记分母。
+     * 这里的成功仅代表系统接受 notify，不代表用户看到/听到，也不保证和 DataStore 原子提交。
+     */
+    fun canSendReminder(context: Context, event: com.GXR806.envhealth.domain.analysis.ReminderPolicy.Event): Boolean {
+        createNotificationChannels(context)
+        val manager = context.getSystemService(NotificationManager::class.java)
+        val channel = if (event.silent) ChannelId.HEALTH_SILENT else ChannelId.HEALTH_ALERT
+        if (Build.VERSION.SDK_INT >= 33 && androidx.core.content.ContextCompat.checkSelfPermission(context,
+                android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) return false
+        if (!androidx.core.app.NotificationManagerCompat.from(context).areNotificationsEnabled()) return false
+        return manager.getNotificationChannel(channel)?.importance != NotificationManager.IMPORTANCE_NONE
+    }
+
+    fun sendReminder(context: Context, event: com.GXR806.envhealth.domain.analysis.ReminderPolicy.Event): Boolean {
+        if (!canSendReminder(context, event)) return false
+        val manager = context.getSystemService(NotificationManager::class.java)
+        val channel = if (event.silent) ChannelId.HEALTH_SILENT else ChannelId.HEALTH_ALERT
+        val content = when (event.type) {
+            com.GXR806.envhealth.domain.analysis.ReminderPolicy.Type.NOISE -> "环境噪音估算值偏高，请远离噪音源。降低音量仅调整媒体音量，不会消除外界噪音。"
+            com.GXR806.envhealth.domain.analysis.ReminderPolicy.Type.VOLUME -> "媒体音量偏高，请降低音量；百分比不代表声压级。"
+            com.GXR806.envhealth.domain.analysis.ReminderPolicy.Type.DURATION -> "连续收听时间较长，建议休息。降低音量不能替代休息。"
+            com.GXR806.envhealth.domain.analysis.ReminderPolicy.Type.WEEKLY -> "最近7天收听累计超过40小时，建议休息；40小时不是安全保证。"
+        }
+        val open = PendingIntent.getActivity(context, 3000 + event.type.ordinal,
+            Intent(context, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        val builder = NotificationCompat.Builder(context, channel)
+            .setSmallIcon(android.R.drawable.ic_dialog_alert).setContentTitle("环境健康提醒")
+            .setContentText(content).setStyle(NotificationCompat.BigTextStyle().bigText(content))
+            .setContentIntent(open).setAutoCancel(true).setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+            .setPriority(if (event.silent) NotificationCompat.PRIORITY_LOW else NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_REMINDER)
+        if (event.silent) builder.setSilent(true).setSound(null).setVibrate(longArrayOf(0))
+        for (action in com.GXR806.envhealth.domain.analysis.ReminderPolicy.Action.entries) {
+            val intent = Intent(context, HealthActionReceiver::class.java).apply {
+                this.action = HealthActionReceiver.ACTION
+                data = android.net.Uri.parse("envhealth://reminder/${event.id}/${action.name}")
+                putExtra("event", event.id); putExtra("type", event.type.name); putExtra("operation", action.name)
+            }
+            val pending = PendingIntent.getBroadcast(context, action.ordinal, intent,
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+            val label = when (action) {
+                com.GXR806.envhealth.domain.analysis.ReminderPolicy.Action.LOWER_VOLUME -> "降低音量"
+                com.GXR806.envhealth.domain.analysis.ReminderPolicy.Action.LATER -> "稍后提醒"
+                com.GXR806.envhealth.domain.analysis.ReminderPolicy.Action.MUTE -> "不再提醒（7天）"
+            }
+            builder.addAction(0, label, pending)
+        }
+        return try { manager.notify(3000 + event.type.ordinal, builder.build()); true }
+        catch (e: SecurityException) { false }
+    }
+
+    fun cancelReminders(context: Context) {
+        val manager = context.getSystemService(NotificationManager::class.java)
+        com.GXR806.envhealth.domain.analysis.ReminderPolicy.Type.entries.forEach { manager.cancel(3000 + it.ordinal) }
     }
 
     /**

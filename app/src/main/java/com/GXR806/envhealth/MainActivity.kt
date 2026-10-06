@@ -48,6 +48,15 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun EnvHealthApp() {
     var selectedTab by rememberSaveable { mutableIntStateOf(0) }
+    var showSettings by rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
+    val app = LocalContext.current.applicationContext as EnvHealthApplication
+    val settingsViewModel: com.GXR806.envhealth.ui.viewmodel.SettingsViewModel =
+        androidx.lifecycle.viewmodel.compose.viewModel(factory = object : androidx.lifecycle.ViewModelProvider.Factory {
+            override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T {
+                @Suppress("UNCHECKED_CAST")
+                return com.GXR806.envhealth.ui.viewmodel.SettingsViewModel(app.appContainer) as T
+            }
+        })
 
     Scaffold(
         bottomBar = {
@@ -55,7 +64,7 @@ private fun EnvHealthApp() {
                 tabTitles.forEachIndexed { index, title ->
                     NavigationBarItem(
                         selected = selectedTab == index,
-                        onClick = { selectedTab = index },
+                        onClick = { selectedTab = index; showSettings = false },
                         icon = {},
                         label = { Text(title) },
                     )
@@ -63,23 +72,26 @@ private fun EnvHealthApp() {
             }
         },
     ) { innerPadding ->
-        TabContent(
+        if (showSettings) {
+            com.GXR806.envhealth.ui.screen.SettingsScreen(settingsViewModel, { showSettings = false }, Modifier.padding(innerPadding))
+        } else TabContent(
             title = tabTitles[selectedTab],
             modifier = Modifier.padding(innerPadding),
             onGoHome = { selectedTab = 0 },
+            onSettings = { showSettings = true },
         )
     }
 }
 
 @Composable
-private fun TabContent(title: String, modifier: Modifier = Modifier, onGoHome: () -> Unit) {
+private fun TabContent(title: String, modifier: Modifier = Modifier, onGoHome: () -> Unit, onSettings: () -> Unit) {
     val context = LocalContext.current
     val app = context.applicationContext as EnvHealthApplication
     
     when (title) {
         "首页" -> {
             // 首页使用真实的 HomeScreen
-            com.GXR806.envhealth.ui.screen.HomeScreen(modifier = modifier)
+            com.GXR806.envhealth.ui.screen.HomeScreen(modifier = modifier, onSettings = onSettings)
         }
         "环境监测" -> {
             // 环境监测页使用真实的 MonitorScreen
@@ -98,16 +110,19 @@ private fun TabContent(title: String, modifier: Modifier = Modifier, onGoHome: (
         "报告" -> {
             // 报告页使用真实的 ReportScreen
             val context = LocalContext.current
-            val viewModel = remember {
-                ReportViewModel(
-                    context = context,
-                    sleepSessionManager = app.appContainer.sleepSessionManager,
-                    generateSleepReportUseCase = app.appContainer.generateSleepReportUseCase,
-                    generateHealthAdviceUseCase = app.appContainer.generateHealthAdviceUseCase,
-                    sleepRepository = app.appContainer.sleepRepository,
-                    adviceRepository = app.appContainer.adviceRepository
-                )
-            }
+            val viewModel: ReportViewModel = androidx.lifecycle.viewmodel.compose.viewModel(factory = object : androidx.lifecycle.ViewModelProvider.Factory {
+                override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T {
+                    @Suppress("UNCHECKED_CAST")
+                    return ReportViewModel(
+                        context = context.applicationContext,
+                        sleepSessionManager = app.appContainer.sleepSessionManager,
+                        generateSleepReportUseCase = app.appContainer.generateSleepReportUseCase,
+                        generateHealthAdviceUseCase = app.appContainer.generateHealthAdviceUseCase,
+                        sleepRepository = app.appContainer.sleepRepository,
+                        adviceRepository = app.appContainer.adviceRepository
+                    ) as T
+                }
+            })
             ReportScreen(viewModel = viewModel, modifier = modifier)
         }
         else -> {

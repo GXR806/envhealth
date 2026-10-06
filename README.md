@@ -1,5 +1,29 @@
 # 环境健康 - Android 应用
 
+## 本轮授权阶段：设置、健康提醒、数据维护（最新交接，优先于下方 P6 历史记录）
+
+### 已实现
+- 首页“设置与数据管理”入口 → Activity 范围 SettingsViewModel → SettingsScreen。噪音阈值40–90估算dB、音量20–80%、连续收听15–90分钟、原子静默起止HH:mm（支持跨午夜，起止相同全天静默）、校准偏移使用可编辑数字/小数 OutlinedTextField 输入并显示当前持久值，保存由 SettingsViewModel 校验 finite 且 0–120dB，默认96dB；空白、非法数字、NaN/Infinity及越界均显示中文错误、不保存、不崩溃。读到新校准设置及清除维护状态变化同步输入，后续帧即时生效。手动改基线版本使旧反馈不覆盖手动意图。
+- 后台开关默认false；首页/报告页遵守开关并引导用户明确授权。开启只保存授权/恢复周期任务，绝不自动启动硬件；回首页手动点击并完成录音/相机/通知权限流程。关闭立即调用服务停止并挂起await全部writer完成，不阻塞Main；旧手动监测可持续直到关闭。服务START_NOT_STICKY，不因系统重建自动采集，启动请求带维护generation以拒绝清除前排队请求。
+- ReminderPolicy与P5评分/P6风险展示独立：每类型24h节流，30天反馈，至少5个完整24h响应窗口；仅降低媒体音量且读回确实更低计有效响应，响应率≥50%阈值-5，<20%阈值+5，范围限制与严重风险保护。百分比不是dB，7天40h不是安全保证。
+- 单一15分钟唯一周期ReminderWorker兼顾提醒与保留；后台false时只清理；BOOT_COMPLETED仅恢复任务，绝不启动Service。每24h至多清理一次，特征采样7天、已结束会话/报告/建议/耳机区间90天，截止线严格小于、保护未结束记录，报告随会话外键级联删除。
+- 通知独立静默渠道，显式immutable动作PendingIntent，私有Receiver校验UUID/类型/动作/URI/持久事件/24h窗口。8秒deadline包括维护锁等待，CancellationException不吞；点击降音量才调整STREAM_MUSIC（MODIFY_AUDIO_SETTINGS，无WRITE_SETTINGS），从不提高当前音量。稍后提醒保持24h节流，静音7天。
+- **先持久claim再notify**：DataStore保存claim失败不会发送；权限/全局通知/频道预检查关闭不消耗分母。明确send=false安全回滚claim；未知异常/进程死亡保留节流，可能丢失一次通知，这是至多一次的明确取舍。分母仅包括notify接受且成功保存的事件，不保证用户真正看见通知；系统notify与DataStore没有跨系统事务。
+- 全量清除可重入：封入口并持久clearing → 取消唯一work → 不持维护写锁停止/await服务及耳机 → 维护锁内清空Room全部表 → 丢弃失败待写耳机区间/历史缓存，清实时快照及通知 → reset全部DataStore（含提醒反馈/静音/节流），后台false → generation失效报告/建议缓存和旧写入 → 恢复仅cleanup工作。失败持久error并fail-closed，再次确认清除可恢复；清除执行段NonCancellable保证离开页面不会半途释放入口。App冷启动先加载维护态；失败/中断清除不自动采集。
+- Service共享AppContainer数据库/仓库，不再另外打开Room；噪音采集、分析、定时writer及光照frame/save/sampling任务cancel+join，CameraX先Main解绑再IO等待分析executor结束，耳机监听Main注销后等单消费者最后落库。报告会话→分析→报告→建议整个链持同一maintenance gate，不嵌套获取同锁等待Service；usecase/会话管理取消异常明确重抛，P5评分算法与旧4个失败测试未改。
+- Room实际schema版本为**3**（本轮没有升级schema；既有destructive fallback意味着旧不兼容版本可能清空数据）。噪音估算校准默认**96dB**，后续帧即时更新，Leq窗口最多1分钟含旧帧，不改历史。
+- 备份与设备转移规则排除所有database、file/datastore、sharedpref，避免记录/提醒反馈/后台授权在恢复时复活。没有原始音频/图像落盘或网络上传。
+
+### 实际验证结果（不得宣称全部验收通过）
+- `:app:assembleDebug :app:assembleDebugAndroidTest`：成功；本次仪器测试最小增强后再次运行`:app:assembleDebugAndroidTest`成功，并重跑下述专项19项成功；未运行仪器测试、未重跑全套。
+- 专项 `ReminderPolicyTest + HeadphoneGuardTest + MaintenanceTest`：**19 passed / 0 skipped / 0 failed**（9+6+4）。维护4项覆盖停止join顺序、失败重试、关闭await、清除取消完成/旧generation拒写。
+- 全套 `:app:testDebugUnitTest`：**61 passed / 0 skipped / 4 failed**，仅原有AdviceEngineTest四项旧阈值/去重断言，未修改它们；不是全绿。
+- `:app:connectedDebugAndroidTest`：**No connected devices!**，没有执行设备测试，不能将编译通过写成仪器测试通过。
+- ReminderIntegrationTest仍为7项（扩展既有测试，未增加项数），已编译、未设备执行：fake sink捕获事件，按本地ZoneId明确日期/时刻直接断言跨午夜两侧silent=true、白天silent=false；设置测试cancelAndJoin旧DataStore owner后，以新scope/PreferenceDataStoreFactory重新打开同一随机临时文件，完整对比设置快照（阈值/校准/后台/原子静默时间）及ReminderStore节流/静音/有效反馈，校验重开后的动作防重放、同type MUTE七天前1ms阻断/截止恢复和reset；另覆盖TestDriver周期/24h/后台关闭仅清理、权限不claim、Room保留边界/进行中保护/报告cascade、清除chain可重入/旧写入拒绝、false sink回滚/未知结果节流、维护阻断。IsolatedTestRunner不启动生产Application/DI调度，临时DataStore、in-memory Room、WorkerFactory手动注入runtime、假时钟/通知sink，不触达生产通知/数据库；tearDown取消当前（包括重开后）owner。NoiseSampleDaoTest改runBlocking；唯一新依赖为批准的androidTest `androidx.work:work-testing:2.9.1`，不新增androidTest coroutines-test、Hilt或其他库。
+- 尚未设备验证：设置UI/权限授权、后台关闭资源释放与最终落库、清除并发/杀进程恢复、BOOT、通知/动作/OEM/音量读回、备份/转移、TestDriver仪器运行。有设备后运行 `:app:connectedDebugAndroidTest` 并逐项验收，不假称成功。
+- 测试分析与安全范围报告：见 [docs/testing.md](docs/testing.md)、[docs/security-alignment.md](docs/security-alignment.md)。
+
+
 ## 项目简介
 
 **环境健康**是一款 Android 应用，旨在帮助用户监测并改善睡眠环境质量。通过实时采集噪音、光照等环境数据，应用能够生成睡眠环境报告，并提供个性化的健康建议。
@@ -35,10 +59,10 @@
 ### 待完成功能
 
 - P6 真机验证（代码已实现）
-- 数据保留策略（P7）
+- 数据保留策略设备验收（P7代码已实现）
 - 自动睡眠判定（P8）
 - 历史报告查看
-- 设置页面
+- 设置页面设备验收（代码已实现）
 
 ## 技术栈
 
@@ -218,5 +242,5 @@ P6 不新增依赖/权限/服务，不请求 WRITE_SETTINGS，不改变音量、
 
 ---
 
-**最后更新**：P6 代码及专项自动化已完成，真机待验证（全套单测存在 4 项 P5 旧断言失败）
-**下一步**：P6 真机验证；P7/P8 仅在新授权后实施
+**最后更新**：设置/提醒/清除/保留与自动化代码已实现；专项19通过，全套61通过/4项P5旧失败，仪器APK编译成功但无设备可运行。
+**下一步**：连接设备完成本轮清单与P6验收；P8自动睡眠与其他扩展未经另行授权不推进。

@@ -17,6 +17,7 @@ import com.GXR806.envhealth.domain.model.LightLevel
 import com.GXR806.envhealth.util.Constants
 import com.GXR806.envhealth.util.LogX
 import com.GXR806.envhealth.util.TimeUtils
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.BufferOverflow
@@ -81,8 +82,23 @@ class LightSensorCamera(
     private var imageAnalysis: ImageAnalysis? = null
     private var isRunning = false
     private var samplingJob: Job? = null
-    private var stopped = false
+    @Volatile private var stopped = false
     private var analysisExecutor: java.util.concurrent.ExecutorService? = null
+    private var stoppedExecutor: java.util.concurrent.ExecutorService? = null
+    private var stoppedSamplingJob: Job? = null
+    suspend fun awaitStopped() {
+        stoppedSamplingJob?.join()
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            val executor = stoppedExecutor
+            if (executor != null) {
+                while (!executor.awaitTermination(1, java.util.concurrent.TimeUnit.SECONDS)) {
+                    kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                }
+            }
+        }
+        stoppedExecutor = null
+        stoppedSamplingJob = null
+    }
     
     // 原子变量存储最新的曝光参数（通过 CaptureCallback 更新）
     private val latestExposureTimeNs = AtomicLong(0L)
@@ -130,6 +146,7 @@ class LightSensorCamera(
         // 即使 Provider 尚未返回也禁止延迟回调再次绑定相机。
         stopped = true
         isRunning = false
+        stoppedSamplingJob = samplingJob
         samplingJob?.cancel()
         samplingJob = null
         try {
@@ -138,6 +155,7 @@ class LightSensorCamera(
             try {
                 cameraProvider?.unbindAll() // CameraX @MainThread
             } finally {
+                stoppedExecutor = analysisExecutor
                 analysisExecutor?.shutdown()
                 analysisExecutor = null
                 cameraProvider = null
@@ -235,6 +253,7 @@ class LightSensorCamera(
      */
     private fun analyzeImage(imageProxy: ImageProxy) {
         try {
+            if (stopped) return
             // 获取 YUV Y 平面
             val yPlane = imageProxy.planes[0]
             val yBuffer = yPlane.buffer

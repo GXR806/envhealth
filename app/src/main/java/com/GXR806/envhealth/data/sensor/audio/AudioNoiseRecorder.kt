@@ -28,8 +28,15 @@ import kotlin.math.sqrt
  * - 每 100ms 输出一帧数据
  */
 class AudioNoiseRecorder(
-    private val calibrationOffset: Float = Constants.Audio.DEFAULT_CALIBRATION_OFFSET
+    calibrationOffset: Float = Constants.Audio.DEFAULT_CALIBRATION_OFFSET
 ) {
+    @Volatile private var calibrationOffset: Float = calibrationOffset
+
+    /** 最新校准在下一帧生效；一帧只读取一次，历史数据不重算。 */
+    fun updateCalibrationOffset(value: Float) {
+        require(value.isFinite() && value in 0f..120f)
+        calibrationOffset = value
+    }
     companion object {
         private const val TAG = "AudioNoiseRecorder"
         
@@ -122,8 +129,15 @@ class AudioNoiseRecorder(
     /**
      * 停止录音
      */
+    private var stoppedRecordingJob: Job? = null
+    suspend fun awaitStopped() {
+        stoppedRecordingJob?.join()
+        stoppedRecordingJob = null
+        _noiseFrameFlow.value = null
+    }
     fun stop() {
         isRecording = false
+        stoppedRecordingJob = recordingJob
         recordingJob?.cancel()
         recordingJob = null
         val record = audioRecord
@@ -164,7 +178,8 @@ class AudioNoiseRecorder(
                 // 等待到下一帧（100ms）
                 delay(FRAME_DURATION_MS.toLong())
 
-            } catch (e: Exception) {
+            } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+            catch (e: Exception) {
                 if (isRecording) {
                     LogX.e(TAG, "录音循环出错", e)
                 }
@@ -182,6 +197,7 @@ class AudioNoiseRecorder(
         if (count <= 0) return
 
         val timestamp = TimeUtils.nowMillis()
+        val offset = calibrationOffset // 一帧一致快照
 
         // 1. 计算原始 RMS
         val rms = calculateRMS(samples, count)
@@ -190,12 +206,12 @@ class AudioNoiseRecorder(
         val dbFs = rmsToDbFS(rms)
 
         // 3. dBFS → dB SPL（考虑校准偏移）
-        val dbSpl = dbFs + calibrationOffset
+        val dbSpl = dbFs + offset
 
         // 4. A 计权处理
         val rmsA = aWeightingFilter.processAndCalculateRMS(samples.copyOf(count))
         val dbFsA = rmsToDbFS(rmsA.toFloat())
-        val dbA = dbFsA + calibrationOffset
+        val dbA = dbFsA + offset
 
         // 5. 输出帧数据
         val frame = NoiseFrame(

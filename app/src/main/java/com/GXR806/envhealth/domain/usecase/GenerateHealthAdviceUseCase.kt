@@ -48,7 +48,8 @@ class GenerateHealthAdviceUseCase(
             
             LogX.i(TAG, "生成健康建议成功: 共 ${savedAdvice.size} 条")
             Result.success(savedAdvice)
-        } catch (e: Exception) {
+        } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+        catch (e: Exception) {
             LogX.e(TAG, "生成健康建议失败", e)
             Result.failure(e)
         }

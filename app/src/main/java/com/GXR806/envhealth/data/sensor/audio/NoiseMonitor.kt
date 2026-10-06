@@ -37,6 +37,9 @@ class NoiseMonitor(
     private val recorder = AudioNoiseRecorder(calibrationOffset)
     private val analyzer = NoiseAnalyzer()
 
+    /** 只改变后续帧；Leq 滑动窗口至多 1 分钟含旧校准帧，不修改算法或历史记录。 */
+    fun updateCalibrationOffset(value: Float) = recorder.updateCalibrationOffset(value)
+
     private var analysisJob: Job? = null
     private var saveJob: Job? = null
 
@@ -119,10 +122,13 @@ class NoiseMonitor(
         // 先释放麦克风，最终数据库写入失败也不能保留采集资源。
         try {
             recorder.stop()
+            recorder.awaitStopped()
         } finally {
             analysisJob?.cancel()
+            analysisJob?.join()
             analysisJob = null
             saveJob?.cancel()
+            saveJob?.join()
             saveJob = null
         }
         try {
@@ -159,7 +165,8 @@ class NoiseMonitor(
 
             repository.insertSample(sample)
             // LogX.d(TAG, "已保存噪音采样: ${result.currentDb} dB")  // 日志已禁用：过于频繁
-        } catch (e: Exception) {
+        } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+        catch (e: Exception) {
             LogX.e(TAG, "保存噪音采样失败", e)
         }
     }

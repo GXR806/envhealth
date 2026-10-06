@@ -5,7 +5,7 @@ import androidx.test.core.app.ApplicationProvider
 import com.GXR806.envhealth.data.local.room.EnvHealthDatabase
 import com.GXR806.envhealth.data.local.room.entity.NoiseSampleEntity
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Before
 import org.junit.Test
@@ -37,7 +37,7 @@ class NoiseSampleDaoTest {
     }
     
     @Test
-    fun insertSample_andRetrieve_success() = runTest {
+    fun insertSample_andRetrieve_success() = runBlocking {
         // Given
         val sample = NoiseSampleEntity(
             timestamp = 1000L,
@@ -57,7 +57,7 @@ class NoiseSampleDaoTest {
     }
     
     @Test
-    fun insertMultipleSamples_andQueryByTimeRange_success() = runTest {
+    fun insertMultipleSamples_andQueryByTimeRange_success() = runBlocking {
         // Given
         val samples = listOf(
             NoiseSampleEntity(timestamp = 1000L, leqDb = 45f, maxDb = 50f, peakDb = 55f, isEvent = false),
@@ -76,7 +76,7 @@ class NoiseSampleDaoTest {
     }
     
     @Test
-    fun getAverageDb_returnsCorrectValue() = runTest {
+    fun getAverageDb_returnsCorrectValue() = runBlocking {
         // Given
         val samples = listOf(
             NoiseSampleEntity(timestamp = 1000L, leqDb = 40f, maxDb = 50f, peakDb = 55f, isEvent = false),
@@ -93,7 +93,7 @@ class NoiseSampleDaoTest {
     }
     
     @Test
-    fun getMaxDb_returnsCorrectValue() = runTest {
+    fun getMaxDb_returnsCorrectValue() = runBlocking {
         // Given
         val samples = listOf(
             NoiseSampleEntity(timestamp = 1000L, leqDb = 40f, maxDb = 50f, peakDb = 55f, isEvent = false),
@@ -110,7 +110,7 @@ class NoiseSampleDaoTest {
     }
     
     @Test
-    fun getEventCount_returnsCorrectValue() = runTest {
+    fun getEventCount_returnsCorrectValue() = runBlocking {
         // Given
         val samples = listOf(
             NoiseSampleEntity(timestamp = 1000L, leqDb = 40f, maxDb = 50f, peakDb = 55f, isEvent = false),
@@ -127,7 +127,7 @@ class NoiseSampleDaoTest {
     }
     
     @Test
-    fun deleteBeforeTime_removesOldData() = runTest {
+    fun deleteBeforeTime_removesOldData() = runBlocking {
         // Given
         val samples = listOf(
             NoiseSampleEntity(timestamp = 1000L, leqDb = 40f, maxDb = 50f, peakDb = 55f, isEvent = false),
@@ -146,7 +146,7 @@ class NoiseSampleDaoTest {
     }
     
     @Test
-    fun deleteAll_removesAllData() = runTest {
+    fun deleteAll_removesAllData() = runBlocking {
         // Given
         val samples = listOf(
             NoiseSampleEntity(timestamp = 1000L, leqDb = 40f, maxDb = 50f, peakDb = 55f, isEvent = false),

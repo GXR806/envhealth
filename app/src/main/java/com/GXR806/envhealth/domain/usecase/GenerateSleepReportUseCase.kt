@@ -49,7 +49,8 @@ class GenerateSleepReportUseCase(
             
             LogX.i(TAG, "生成睡眠报告成功: reportId=$reportId, totalScore=${report.totalScore}")
             Result.success(savedReport to analysisResult)
-        } catch (e: Exception) {
+        } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+        catch (e: Exception) {
             LogX.e(TAG, "生成睡眠报告失败", e)
             Result.failure(e)
         }

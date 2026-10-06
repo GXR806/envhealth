@@ -36,6 +36,15 @@ class LightMonitor(
     
     private var camera: LightSensorCamera? = null
     private var saveJob: Job? = null
+    private var frameJob: Job? = null
+    private var stoppedJobs = emptyList<Job>()
+    private var stoppedCamera: LightSensorCamera? = null
+    suspend fun awaitStopped() {
+        stoppedJobs.forEach { it.join() }
+        stoppedCamera?.awaitStopped()
+        stoppedCamera = null
+        stoppedJobs = emptyList()
+    }
     private var isRunning = false
     
     /** 最新的光照帧（用于保存） */
@@ -65,13 +74,14 @@ class LightMonitor(
             }
             
             // 订阅光照数据流
-            scope.launch {
+            frameJob = scope.launch {
                 camera?.lightFrameFlow?.collect { frame ->
                     latestFrame = frame
                 }
             }
             
             // 启动定时保存任务
+            isRunning = true
             saveJob = scope.launch {
                 while (isRunning) {
                     delay(SAVE_INTERVAL_MS)
@@ -96,10 +106,13 @@ class LightMonitor(
     fun stop() {
         check(android.os.Looper.myLooper() == android.os.Looper.getMainLooper())
         try {
-            saveJob?.cancel()
+            stoppedJobs = listOfNotNull(saveJob, frameJob)
+            stoppedJobs.forEach { it.cancel() }
+            frameJob = null
             camera?.stop()
         } finally {
             saveJob = null
+            stoppedCamera = camera
             camera = null
             latestFrame = null
             isRunning = false
@@ -127,7 +140,8 @@ class LightMonitor(
             
             LogX.d(TAG, "已保存光照采样 - 亮度: ${frame.relativeBrightness.toInt()}%, 等级: ${frame.level}")
             
-        } catch (e: Exception) {
+        } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+        catch (e: Exception) {
             LogX.e(TAG, "保存光照采样失败", e)
         }
     }

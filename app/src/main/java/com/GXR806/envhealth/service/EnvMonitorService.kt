@@ -31,7 +31,6 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 
 /**
  * 环境监测前台服务
@@ -48,6 +47,12 @@ class EnvMonitorService : LifecycleService() {
 
     companion object {
         private const val TAG = "EnvMonitorService"
+        private var active: EnvMonitorService? = null
+        private var finishing: Job? = null
+        suspend fun stopAndAwait() = kotlinx.coroutines.withContext(Dispatchers.Main.immediate) {
+            active?.stopMonitoring()
+            finishing?.join()
+        }
 
         /** Action: 启动监测 */
         const val ACTION_START_MONITOR = "com.GXR806.envhealth.action.START_MONITOR"
@@ -63,8 +68,11 @@ class EnvMonitorService : LifecycleService() {
          */
         fun startMonitoring(context: Context): Boolean {
             return try {
+                val container = (context.applicationContext as com.GXR806.envhealth.EnvHealthApplication).appContainer
+                if (container.maintenanceGate.blocked.value) return false
                 val intent = Intent(context, EnvMonitorService::class.java).apply {
                     action = ACTION_START_MONITOR
+                    putExtra("generation", container.maintenanceGate.generation.value)
                 }
 
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -100,6 +108,7 @@ class EnvMonitorService : LifecycleService() {
 
     private val binder = LocalBinder()
     private var isMonitoring = false
+    private var isStarting = false
     private var isStopping = false
     private var isDestroyed = false
     private var cleanupJob: Job? = null
@@ -131,6 +140,7 @@ class EnvMonitorService : LifecycleService() {
 
     override fun onCreate() {
         super.onCreate()
+        active = this
         LogX.i(TAG, "服务创建")
         
         // 初始化噪音监测器
@@ -138,6 +148,14 @@ class EnvMonitorService : LifecycleService() {
         
         // 初始化光照监测器
         initializeLightMonitor()
+        serviceScope.launch(Dispatchers.Main.immediate) {
+            var wasEnabled: Boolean? = null
+            (application as com.GXR806.envhealth.EnvHealthApplication).appContainer.settingsRepository.snapshot.collect {
+                noiseMonitor?.updateCalibrationOffset(it.dbCalibrationOffset)
+                if ((wasEnabled == true && !it.backgroundMonitoringEnabled) || it.maintenanceState.isNotEmpty()) stopMonitoring()
+                wasEnabled = it.backgroundMonitoringEnabled
+            }
+        }
     }
 
     /**
@@ -146,13 +164,7 @@ class EnvMonitorService : LifecycleService() {
     private fun initializeLightMonitor() {
         try {
             // 获取数据库实例
-            val database = androidx.room.Room.databaseBuilder(
-                applicationContext,
-                EnvHealthDatabase::class.java,
-                EnvHealthDatabase.DATABASE_NAME
-            ).build()
-            val lightDao = database.lightSampleDao()
-            val lightRepository = com.GXR806.envhealth.data.repository.LightRepository(lightDao)
+            val lightRepository = (application as com.GXR806.envhealth.EnvHealthApplication).appContainer.lightRepository
 
             // 创建光照监测器
             lightMonitor = LightMonitor(applicationContext, this, lightRepository)
@@ -168,19 +180,10 @@ class EnvMonitorService : LifecycleService() {
     private fun initializeNoiseMonitor() {
         try {
             // 获取数据库实例
-            val database = androidx.room.Room.databaseBuilder(
-                applicationContext,
-                EnvHealthDatabase::class.java,
-                EnvHealthDatabase.DATABASE_NAME
-            ).build()
-            val noiseDao = database.noiseSampleDao()
-            val noiseRepository = NoiseRepository(noiseDao)
+            val noiseRepository = (application as com.GXR806.envhealth.EnvHealthApplication).appContainer.noiseRepository
 
-            // 获取校准偏移（从 DataStore）
-            val settingsDataStore = SettingsDataStore(applicationContext)
-            val calibrationOffset = runBlocking {
-                settingsDataStore.dbCalibrationOffset.first()
-            }
+            // 默认96f，随后 settings snapshot 收集更新；不在主线程阻塞 DataStore IO。
+            val calibrationOffset = SettingsDataStore.DEFAULT_DB_CALIBRATION_OFFSET
 
             // 创建噪音监测器
             noiseMonitor = NoiseMonitor(noiseRepository, calibrationOffset)
@@ -194,24 +197,32 @@ class EnvMonitorService : LifecycleService() {
         super.onStartCommand(intent, flags, startId)
         when (intent?.action) {
             ACTION_START_MONITOR -> {
-                startMonitoring()
+                val container = (application as com.GXR806.envhealth.EnvHealthApplication).appContainer
+                if (intent.getLongExtra("generation", -1L) != container.maintenanceGate.generation.value || container.maintenanceGate.blocked.value) {
+                    stopSelf()
+                } else startMonitoring()
             }
             ACTION_STOP_MONITOR -> {
                 stopMonitoring()
             }
         }
-        return START_STICKY
+        return START_NOT_STICKY
     }
 
     /**
      * 启动监测
      */
     private fun startMonitoring() {
-        if (isMonitoring || isStopping || isDestroyed) {
+        if ((application as com.GXR806.envhealth.EnvHealthApplication).appContainer.maintenanceGate.blocked.value || finishing?.isActive == true) {
+            stopSelf()
+            return
+        }
+        if (isMonitoring || isStarting || isStopping || isDestroyed) {
             LogX.w(TAG, "监测已在运行中")
             return
         }
 
+        isStarting = true
         try {
             // 创建停止监测的 PendingIntent
             val stopIntent = PendingIntent.getService(
@@ -252,6 +263,25 @@ class EnvMonitorService : LifecycleService() {
                 )
             }
 
+            // 前台通知先满足系统期限；读取授权后再开始硬件采集。
+            serviceScope.launch(Dispatchers.Main.immediate) {
+                val container = (application as com.GXR806.envhealth.EnvHealthApplication).appContainer
+                val settings = container.settingsRepository.snapshot.first()
+                if (!settings.backgroundMonitoringEnabled || settings.maintenanceState.isNotEmpty() || container.maintenanceGate.blocked.value || isStopping || isDestroyed) {
+                    stopMonitoring()
+                    return@launch
+                }
+                beginCollection()
+            }
+        } catch (e: Exception) {
+            LogX.e(TAG, "启动监测失败", e)
+            stopMonitoring()
+        }
+    }
+
+    private fun beginCollection() {
+        try {
+            isStarting = false
             isMonitoring = true
             MonitorState.setMonitoring(true)
 
@@ -301,14 +331,15 @@ class EnvMonitorService : LifecycleService() {
     private fun stopMonitoring() {
         if (isStopping || cleanupJob != null) return
         isStopping = true
+        isStarting = false
         // 明确拥有的短生命周期作用域，不作为 serviceScope 的子任务。
         // onDestroy 取消采集任务不会取消最终落库，完成后自动释放该作用域。
         val cleanupScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
         cleanupJob = cleanupScope.launch {
             try {
-                dataFlowJob?.cancel()
+                val uiJobs = listOfNotNull(dataFlowJob, lightDataFlowJob)
+                uiJobs.forEach { it.cancel() }
                 dataFlowJob = null
-                lightDataFlowJob?.cancel()
                 lightDataFlowJob = null
                 val headphoneDone = try {
                     headphoneGuard.stop() // Main 上立即注销，不等待数据库
@@ -319,6 +350,8 @@ class EnvMonitorService : LifecycleService() {
                 try {
                     // CameraX unbindAll 必须 Main；在任何 IO 等待前先停止相机。
                     lightMonitor?.stop()
+                    uiJobs.forEach { it.join() }
+                    lightMonitor?.awaitStopped()
                 } catch (e: Exception) {
                     LogX.e(TAG, "停止光照监测失败", e)
                 } finally {
@@ -349,10 +382,12 @@ class EnvMonitorService : LifecycleService() {
                 LogX.i(TAG, "监测服务已停止")
             }
         }
+        finishing = cleanupJob
     }
 
     override fun onDestroy() {
         isDestroyed = true
+        if (active === this) active = null
         // Main.immediate 立即注销耳机和解绑相机，IO 释放录音/最终存储独立继续。
         try {
             stopMonitoring()

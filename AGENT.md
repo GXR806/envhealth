@@ -1,12 +1,31 @@
 # AGENT 上下文交接文档
 
+## 0. 最新授权阶段交接（优先于下方P6历史描述）
+
+本轮已实施设置VM/Screen/首页入口、后台关闭await、完整可重入清除chain、采集与writer全部join、报告链maintenance gate、后台false重置/仅cleanup恢复、BOOT任务恢复、备份排除、TestDriver隔离测试。具体规则与实现详见README最前“本轮授权阶段”和docs/testing.md、docs/security-alignment.md。未实现P8自动睡眠或历史报告；不可擅自加依赖/改P5算法。
+
+- 实际Room为**schema v3**，已有destructive fallback；本轮未升级。噪音校准默认**96dB**，实时后续帧更新、Leq最多1min含旧校准。下文v1/0f是旧阶段记录，不得照抄为当前事实。
+- SettingsScreen校准使用可编辑OutlinedTextField数字/小数输入，显示当前持久偏移；保存经SettingsVM operation内toFloatOrNull、finite和0..120校验，非法输入中文错误、不崩溃、不落库。新校准设置/清除维护状态变化同步输入；默认96及后续帧即时生效保持不变。
+- SettingsScreen通过Activity ViewModel，后台默认false、开启不自动采集，Home/报告先开关授权再手动启动；服务START_NOT_STICKY及启动generation检查。关闭DataStore后立刻停止await所有writer，不能因defaultfalse在刚启动时反复自动停。
+- DataMaintenance使用独立clearMutex串行清除/开关，maintenanceGate封新入口；持久clearing，取消work，**不持gate等待stop/join**，然后gate内clearAllTables/清缓存/通知/reset，后台false，generation失效旧报告写入/缓存，恢复唯一cleanup工作。error持久fail-closed并可重复清除恢复。执行段NonCancellable，UI离开不导致删除后还开着入口。所有新的写入调用必须遵守gate/generation，不可新加绕过gate的报告caller。
+- NoiseMonitor取消并join分析/save/录音任务；LightMonitor保留停止任务和camera，先Main解绑后join frame/save/sampling、IO等待analysis executor结束；Service使用AppContainer共享Room。HeadphoneGuard停止后清除tracker pending和历史缓存generation，防止清除后失败待写/旧读取复活。系统强杀仍不能保证最后落库。
+- 报告整条链由ReportViewModel gate串行，MainActivity以viewModel(factory)获取，不再remember裸VM；UseCase/SessionManager只作必要CancellationException重抛，无P5公式/阈值改动。不在usecase内重复获取同一mutex以免死锁。
+- 提醒先DataStore durable节流claim后notify，未知结果保留claim（可能少一次通知），明确false回滚；权限/频道关闭预检查不claim、不计响应分母。真实接受且保存成功事件才算分母。ActionReceiver8s超时覆盖锁等待，私有显式immutable动作、UUID/URI/持久事件匹配、claimAction防重放、读回更低才有效。
+- BOOT仅恢复Work，不启动硬件。后台false周期Worker只执行保留，clearing/error阻断。备份/设备转移排除database、datastore文件、sharedpref。
+- 新依赖仅批准androidTest work-testing2.9.1；维持manualDI，测试Runner使用普通Application隔离生产调度，独立临时DataStore/in-memory Room、假clock/sink/WorkerFactory；NoiseSampleDaoTest runBlocking，无新增androidTest coroutines-test/Hilt。
+- 真实结果：assembleDebug与assembleDebugAndroidTest成功；ReminderPolicy9 + HeadphoneGuard6 + Maintenance4 = **19通过**。全套最新**61通过/4失败/0跳过**，4项原有AdviceEngineTest保持不动。connectedDebugAndroidTest失败 **No connected devices!**；7项新仪器集成测试仅编译，没有执行。不得声称设备/仪器/全套全绿。
+- 待验收：首页设置与阈值持久/静默边界、校准实时、关闭监听/CameraX/AudioRecord释放及最终落库、并发清除/重试/进程恢复/旧VM缓存、通知权限/频道/动作/OEM/BOOT/备份恢复；P6全部原设备项仍待测。
+
+下方P6段为历史交接：有冲突时以上最新段及代码为准。
+
+
 ## 1. 当前阶段与进度
 
 **P5 睡眠环境分析与建议引擎已完成**：实现睡眠会话管理、三维评分算法（噪音/光照/规律性）、12+ 条规则驱动的建议引擎、报告页面 UI（圆形评分图表 + 三维评分 + 建议列表）。集成到 MainActivity，支持手动开始/结束睡眠监测，自动生成报告与建议。编译通过，功能完整可运行。
 
 **已完成模块**：P0 工程脚手架、P1 数据层骨架、P2 权限通知服务框架、P3 噪音检测模块、P4 光照检测模块（真实 Lux 值计算）、P5 睡眠环境分析与建议引擎。
 
-**当前未完成**：设备启动验证、P6 真机验收、数据保留策略、自动睡眠判定。P6 代码与 6 项专项单测已完成；全套单测 48 通过/4 项原有 AdviceEngineTest 失败，勿声称全套验证通过。
+**当前未完成**：设备启动验证、P6及本轮真机验收、自动睡眠判定。设置/保留/提醒/清除已实现；最新全套61通过/4项原有AdviceEngineTest失败，仪器测试无设备，勿声称全部验证通过。
 
 ## 2. 架构总览
 
@@ -37,7 +56,7 @@ Service、Worker、Notification 作为后台任务边界，必须由用户可停
 - **`domain/usecase`**：**已完成** - GenerateSleepReportUseCase、GenerateHealthAdviceUseCase。
 - **`domain/analysis`**：**已完成** - SleepAnalyzer（三维评分算法）、AdviceEngine（12+ 条规则）。
 - **`domain/sleep`**：**已完成** - SleepSessionManager（睡眠会话管理器）。
-- **`data/local/room`**：**已完成** - 6 个 Entity + 6 个 DAO + EnvHealthDatabase（版本 1，schema 已导出）。
+- **`data/local/room`**：**已完成** - 6 个 Entity + 6 个 DAO + EnvHealthDatabase（实际版本 3，schema 已导出）。
 - **`data/local/datastore`**：**已完成** - SettingsDataStore 用户设置持久化。
 - **`data/repository`**：**已完成** - 6 个 Repository（新增 AdviceRepository）统一暴露 Flow。
 - **`data/sensor/audio`**：**已完成** - AudioNoiseRecorder（录音器）+ NoiseAnalyzer（分析器）+ NoiseMonitor（管理器）。
@@ -46,7 +65,7 @@ Service、Worker、Notification 作为后台任务边界，必须由用户可停
 - **`notification`**：**NotificationHelper 已完成** - 通知渠道与通知构建封装。
 - **`di`**：**AppContainer 已完成** - 手动依赖注入容器。
 - **`EnvHealthApplication`**：**已完成** - 应用程序类，初始化 AppContainer。
-- `worker`：任务调度；当前不启动。
+- `worker`：ReminderWorker唯一15分钟周期；后台关闭仅清理，Boot仅恢复调度，DataMaintenance全量维护。
 - **`util`**：Constants、LogX、TimeUtils、**MonitorState**（全局状态）、**AppResult**（结果封装）。
 - **`util/permission`**：**PermissionManager** + Compose 权限扩展 + **PermissionRationaleDialog**。
 
@@ -220,7 +239,7 @@ Service、Worker、Notification 作为后台任务边界，必须由用户可停
 
 ## 6. 关键常量与校准参数
 
-- `DEFAULT_DB_CALIBRATION_OFFSET_DB = 0f`：分贝估算校准偏移占位
+- `SettingsDataStore.DEFAULT_DB_CALIBRATION_OFFSET = 96f`：当前运行默认分贝估算校准偏移（可配置）；不是实测标准声压校准
 - `DEFAULT_LUX_K = 125f`：Lux 估算校准常数（室内开灯环境显示 250-500 lux）
 - `DEDUP_WINDOW_MS = 24 * 3600_000L`：建议去重窗口（24 小时）
 - `MIN_SESSIONS_FOR_REGULARITY = 3`：规律性评分最少数据要求
@@ -230,7 +249,7 @@ Service、Worker、Notification 作为后台任务边界，必须由用户可停
 
 - 四 Tab 当前没有图标
 - 耳机守护代码已完成，插拔/播放/OEM/停止资源释放等设备验证待进行
-- 数据保留策略（7 天/90 天）未实现
+- 数据保留策略（7 天/90 天）已实现，设备验收未完成
 - 自动睡眠判定未实现
 - 设备验证尚未进行
 - 校准偏移参数需要用户通过标准设备校准

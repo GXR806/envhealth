@@ -52,7 +52,8 @@ class SleepSessionManager(
             val sessionId = sleepRepository.insertSession(session)
             LogX.i(TAG, "手动开始睡眠会话，sessionId=$sessionId")
             Result.success(sessionId)
-        } catch (e: Exception) {
+        } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+        catch (e: Exception) {
             LogX.e(TAG, "开始睡眠会话失败", e)
             Result.failure(e)
         }
@@ -86,7 +87,8 @@ class SleepSessionManager(
             sleepRepository.updateSession(updatedSession)
             LogX.i(TAG, "睡眠会话已结束，sessionId=$sessionId")
             Result.success(Unit)
-        } catch (e: Exception) {
+        } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+        catch (e: Exception) {
             LogX.e(TAG, "结束睡眠会话失败", e)
             Result.failure(e)
         }
@@ -120,7 +122,8 @@ class SleepSessionManager(
             sleepRepository.updateSession(updatedSession)
             LogX.i(TAG, "睡眠会话已取消，sessionId=$sessionId")
             Result.success(Unit)
-        } catch (e: Exception) {
+        } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+        catch (e: Exception) {
             LogX.e(TAG, "取消睡眠会话失败", e)
             Result.failure(e)
         }

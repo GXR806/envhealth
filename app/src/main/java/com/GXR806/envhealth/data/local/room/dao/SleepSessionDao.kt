@@ -71,6 +71,10 @@ interface SleepSessionDao {
     /**
      * 删除全部数据
      */
+    /** 90 天聚合清理：保护进行中会话，报告由外键 CASCADE 同事务删除。 */
+    @Query("DELETE FROM sleep_sessions WHERE status != 'ONGOING' AND endTime IS NOT NULL AND endTime < :beforeTime")
+    suspend fun deleteCompletedBeforeEnd(beforeTime: Long): Int
+
     @Query("DELETE FROM sleep_sessions")
     suspend fun deleteAll(): Int
 }

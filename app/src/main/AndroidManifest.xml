@@ -37,6 +37,11 @@
             </intent-filter>
         </activity>
 
+        <receiver android:name=".notification.HealthActionReceiver" android:exported="false" />
+        <receiver android:name=".worker.BootReceiver" android:exported="false">
+            <intent-filter><action android:name="android.intent.action.BOOT_COMPLETED" /></intent-filter>
+        </receiver>
+
         <!-- 环境监测前台服务 -->
         <service
             android:name=".service.EnvMonitorService"
