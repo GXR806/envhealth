@@ -1,183 +1,195 @@
-# 环境健康（EnvHealth）
+# 环境健康 - Android 应用
 
-> 数智随行，健康随行
+## 项目简介
 
-## 简介
+**环境健康**是一款 Android 应用，旨在帮助用户监测并改善睡眠环境质量。通过实时采集噪音、光照等环境数据，应用能够生成睡眠环境报告，并提供个性化的健康建议。
 
-环境健康是一个 Kotlin + Jetpack Compose + Material 3 的本地优先应用，用于环境监测、耳机守护与健康报告。采用 MVVM + 单向数据流架构，Room + DataStore 持久化，协程 + Flow 响应式编程。
+## 核心功能
 
-当前已完成数据层骨架（领域模型、Room 数据库、DataStore 设置、Repository 仓库），尚未实现采集、分析、通知或运行时权限申请。
+### 已完成功能（v1.4）
 
-## 功能特性
+#### 1. 环境监测
+- **噪音检测**：实时监测环境噪音（Leq、Max、Peak dB），突发噪音事件检测
+- **光照检测**：使用后置摄像头计算真实 Lux 值，支持光照等级判定（黑暗/昏暗/正常/明亮/强光）
 
-- [x] Compose 应用骨架与 Material 3 主题
-- [x] 底部四 Tab 占位导航：首页、环境监测、耳机守护、报告
-- [x] UI / ViewModel / Domain / Data / Service / Worker / Notification 分层目录
-- [x] **领域模型**：6 个枚举 + 6 个数据类（噪音、光照、睡眠、耳机、建议）
-- [x] **Room 数据库**：6 个 Entity + 6 个 DAO + Database（版本 1，schema 已导出）
-- [x] **DataStore 设置**：用户配置持久化（阈值、开关、校准参数）
-- [x] **Repository 仓库**：5 个 Repository 统一暴露 Flow
-- [x] **单元测试**：DAO 增删查改 + 时间范围查询 + 聚合查询测试
-- [x] 统一常量、日志、时间工具
-- [ ] 环境传感器采集（待负责人下达任务）
-- [ ] 音频与图像特征分析（待负责人下达任务）
-- [ ] 报告与通知（待负责人下达任务）
+#### 2. 睡眠环境分析 ⭐ 新功能
+- **睡眠会话管理**：手动开始/结束睡眠监测
+- **三维评分算法**：
+  - 噪音评分（0-100）：基于平均分贝、峰值分贝、突发事件次数
+  - 光照评分（0-100）：基于平均光照、波动、睡前趋势
+  - 规律性评分（0-100）：基于近 7 天入睡时间标准差
+  - 综合评分：加权和（噪音 45% + 光照 35% + 规律性 20%）
+- **智能建议引擎**：基于 12+ 条规则生成个性化建议，24 小时内自动去重
+
+#### 3. 报告页面 ⭐ 新功能
+- **圆形评分图表**：直观展示综合评分（0-100）
+- **三维评分展示**：噪音/光照/规律性详细评分
+- **建议列表**：可展开/收起的健康建议卡片
+
+### 待完成功能
+
+- 耳机守护模块（P6）
+- 数据保留策略（P7）
+- 自动睡眠判定（P8）
+- 历史报告查看
+- 设置页面
+
+## 技术栈
+
+- **语言**：Kotlin
+- **UI 框架**：Jetpack Compose + Material 3
+- **架构**：MVVM + 单向数据流
+- **数据库**：Room
+- **相机**：CameraX + Camera2 Interop
+- **音频**：AudioRecord
+- **并发**：Kotlin Coroutines + Flow
+- **权限管理**：Accompanist Permissions
+- **依赖注入**：手动 DI（AppContainer）
+
+## 项目结构
+
+```text
+com.GXR806.envhealth/
+├── ui/                          # UI 层
+│   ├── screen/                  # 页面
+│   │   ├── HomeScreen.kt        # 首页（监测控制）
+│   │   ├── MonitorScreen.kt     # 环境监测页面
+│   │   └── ReportScreen.kt      # 报告页面 ⭐
+│   ├── viewmodel/               # ViewModel
+│   │   └── ReportViewModel.kt   # 报告 ViewModel ⭐
+│   └── theme/                   # 主题
+├── domain/                      # 领域层
+│   ├── model/                   # 领域模型
+│   ├── sleep/                   # 睡眠管理 ⭐
+│   │   └── SleepSessionManager.kt
+│   ├── analysis/                # 分析引擎 ⭐
+│   │   ├── SleepAnalyzer.kt
+│   │   ├── AdviceEngine.kt
+│   │   └── NoiseAnalyzer.kt
+│   └── usecase/                 # 用例 ⭐
+│       ├── GenerateSleepReportUseCase.kt
+│       └── GenerateHealthAdviceUseCase.kt
+├── data/                        # 数据层
+│   ├── local/room/              # 数据库
+│   │   ├── entity/              # 6 个 Entity
+│   │   ├── dao/                 # 6 个 DAO
+│   │   └── EnvHealthDatabase.kt
+│   ├── repository/              # 仓库
+│   │   ├── NoiseRepository.kt
+│   │   ├── LightRepository.kt
+│   │   ├── SleepRepository.kt
+│   │   └── AdviceRepository.kt  ⭐
+│   └── sensor/                  # 传感器
+│       ├── audio/               # 音频采集
+│       └── light/               # 光照采集
+├── service/                     # 服务
+│   └── EnvMonitorService.kt     # 前台服务
+├── notification/                # 通知
+│   └── NotificationHelper.kt
+├── di/                          # 依赖注入 ⭐
+│   └── AppContainer.kt
+├── util/                        # 工具类
+│   └── permission/              # 权限管理
+├── EnvHealthApplication.kt      # 应用程序类 ⭐
+└── MainActivity.kt              # 主 Activity
+```
+
+## 开发规范
+
+### 代码风格
+- 包名：`com.GXR806.envhealth`
+- 代码注释、UI 文案、文档使用中文
+- 代码函数命名使用符合 Kotlin 习惯的英文
+- 时间统一使用毫秒时间戳（TimeUtils.nowMillis()）
+- 日志通过 LogX 统一管理
+
+### 架构约束
+- 禁止主线程 IO、GlobalScope、裸 Thread
+- 所有采集任务必须可停止并释放资源
+- 音频、图像只做内存特征计算，不落盘、不上传、不保存原始帧
+- 前台服务必须可被用户停止并释放资源
+
+### 数据保留策略
+- 原始采样数据（noise_samples, light_samples）：保留 7 天
+- 聚合报告与记录（sleep_sessions, sleep_reports, advice_items）：保留 90 天
 
 ## 构建与运行
 
 ### 环境要求
-- **Android Gradle Plugin**：9.4.1
-- **Gradle Wrapper**：9.6.0
-- **Kotlin**：2.0.21
-- **Room**：2.7.0-alpha12
-- **Java 源码兼容性**：11
-- **compileSdk / targetSdk**：34
-- **minSdk**：26
+- Android Studio Rabbit (2026.2.1) 或更高版本
+- JDK 11
+- Android SDK 34
+- Gradle 9.6.0
+- AGP 9.4.1
 
-### 构建命令
+### 编译
 ```bash
-./gradlew assembleDebug        # 构建 Debug APK
-./gradlew test                 # 运行单元测试
-./gradlew connectedAndroidTest # 运行 Instrumentation 测试（需连接设备）
+./gradlew assembleDebug
 ```
 
-### 数据保留策略
-- **原始采样数据**（`noise_samples`, `light_samples`）：保留 7 天
-- **聚合报告与记录**（`sleep_sessions`, `sleep_reports`, `headphone_usage`, `advice_items`）：保留 90 天
-
-### Room Schema 导出
-数据库 schema 文件位于 `app/schemas/com.GXR806.envhealth.data.local.room.EnvHealthDatabase/1.json`
+### 运行
+1. 部署到真机（推荐，需要麦克风和相机权限）
+2. 点击"首页" Tab，授予权限后点击"开始监测"
+3. 切换到"环境监测" Tab 查看实时数据
+4. 切换到"报告" Tab，开始睡眠监测，结束后查看报告与建议
 
 ## 权限说明
 
-Manifest 已预先声明后续功能所需权限，但本阶段不主动申请、不执行采集：
+应用需要以下权限：
+- `RECORD_AUDIO`：录制音频以监测噪音
+- `CAMERA`：使用摄像头计算光照强度
+- `POST_NOTIFICATIONS`（Android 13+）：发送前台服务通知
+- `FOREGROUND_SERVICE`：运行前台服务
+- `FOREGROUND_SERVICE_MICROPHONE`：麦克风类型前台服务
+- `FOREGROUND_SERVICE_CAMERA`：相机类型前台服务
 
-- `RECORD_AUDIO`：后续耳机守护与环境声音估算
-- `CAMERA`：后续图像特征分析
-- `POST_NOTIFICATIONS`：后续健康提醒
-- `FOREGROUND_SERVICE`、`FOREGROUND_SERVICE_MICROPHONE`、`FOREGROUND_SERVICE_CAMERA`：后续长时任务
-- `MODIFY_AUDIO_SETTINGS`：后续音量相关功能
-- `RECEIVE_BOOT_COMPLETED`：后续按用户设置恢复后台任务
+**隐私承诺**：
+- 原始音频与图像仅在内存中处理，不落盘、不上传
+- 所有采集数据仅用于本地分析，不会发送到任何服务器
 
-后续实现必须区分拒绝、拒绝且不再询问、永久拒绝，并提供设置页降级路径。
+## 版本历史
 
-## 隐私声明
+### v1.4（当前版本）⭐
+- ✅ 实现睡眠会话管理（手动开始/结束）
+- ✅ 实现三维评分算法（噪音/光照/规律性）
+- ✅ 实现智能建议引擎（12+ 条规则，24 小时去重）
+- ✅ 实现报告页面 UI（圆形评分 + 三维评分 + 建议列表）
+- ✅ 集成依赖注入（AppContainer + EnvHealthApplication）
 
-设计目标为隐私优先：
+### v1.3
+- ✅ 实现光照检测模块（真实 Lux 值计算）
+- ✅ 使用后置摄像头 + Camera2 Interop 获取曝光参数
+- ✅ 调整校准常数 K = 125（室内开灯环境显示 250-500 lux）
+- ✅ 集成到 EnvMonitorService
 
-1. **数据不落盘**：音频与图像只在内存中提取特征，不落盘、不上传、不保存原始帧
-2. **估算值标注**：所有估算指标（分贝 dB、照度 lux）必须显式标注"估算值"
-3. **校准参数可配置**：`SettingsDataStore` 中的 `dbCalibrationOffset` 和 `luxEstimationFactor` 当前为占位常量（默认值 0f 和 1f），不代表真实测量结果
-4. **数据自动清理**：原始采样数据 7 天自动删除，聚合报告 90 天自动删除
+### v1.2
+- ✅ 实现噪音检测模块（AudioRecord + RMS/Leq/Max）
+- ✅ 实现前台服务框架（EnvMonitorService）
+- ✅ 实现监测页面 UI（实时曲线图 + 噪音等级）
 
-## 项目结构
+### v1.1
+- ✅ 实现权限管理框架（三态处理 + 权限引导对话框）
+- ✅ 实现通知基础设施（NotificationHelper）
 
-```
-com.GXR806.envhealth/
-├── ui/                          # UI 层
-│   ├── screen/                  # 页面（当前为占位）
-│   ├── component/               # 复用组件（当前为占位）
-│   ├── theme/                   # Compose 主题
-│   ├── navigation/              # 导航约定（当前四 Tab，使用 rememberSaveable）
-│   └── viewmodel/               # 状态与事件（当前为占位）
-├── domain/                      # 领域层
-│   ├── model/                   # 领域模型（6 个枚举 + 6 个数据类）
-│   ├── usecase/                 # 用例（当前为占位）
-│   └── analysis/                # 分析逻辑（当前为占位）
-├── data/                        # 数据层
-│   ├── local/
-│   │   ├── room/                # Room 数据库
-│   │   │   ├── entity/          # 6 个 Entity
-│   │   │   ├── dao/             # 6 个 DAO
-│   │   │   └── EnvHealthDatabase.kt
-│   │   └── datastore/           # DataStore 设置
-│   │       └── SettingsDataStore.kt
-│   ├── repository/              # 5 个 Repository
-│   └── sensor/                  # 传感器接入（当前不采集）
-│       ├── audio/
-│       ├── light/
-│       └── volume/
-├── service/                     # 后台服务（当前不启动）
-├── worker/                      # 任务调度（当前不启动）
-├── notification/                # 通知（当前不发送）
-└── util/                        # 工具类
-    ├── Constants.kt             # 全局常量
-    ├── LogX.kt                  # 日志工具
-    └── TimeUtils.kt             # 时间工具
-```
+### v1.0
+- ✅ 项目脚手架（Kotlin + Jetpack Compose + Material 3）
+- ✅ 数据库设计（Room + 6 个 Entity + 6 个 DAO）
+- ✅ Repository 层实现
 
-## 数据模型
+## 文档
 
-### 领域模型（Domain Models）
+- [TODO.md](TODO.md)：项目开发清单
+- [AGENT.md](AGENT.md)：AI Agent 上下文交接文档
 
-| 模型 | 字段 | 说明 |
-|------|------|------|
-| `NoiseSample` | timestamp, leqDb, maxDb, peakDb, isEvent | 噪音采样（估算值） |
-| `LightSample` | timestamp, avgLuma, estimatedLux, level | 光照采样（估算值） |
-| `SleepSession` | id, startTime, endTime, type, status | 睡眠会话 |
-| `SleepReport` | sessionId, noiseScore, lightScore, regularityScore, totalScore, summary | 睡眠报告 |
-| `HeadphoneUsage` | id, startTime, endTime, avgVolumePercent, maxVolumePercent, deviceType | 耳机使用记录 |
-| `AdviceItem` | id, category, priority, title, content, triggerReason | 健康建议 |
+## 贡献指南
 
-### DataStore 设置项（Settings Keys）
+本项目当前为内部开发阶段，暂不接受外部贡献。如有问题或建议，请联系项目负责人。
 
-| 设置项 | Key | 默认值 | 说明 |
-|--------|-----|--------|------|
-| 噪音阈值 | `noise_threshold_db` | 70f | 分贝（估算值） |
-| 噪音监测开关 | `noise_monitoring_enabled` | false | - |
-| 音量阈值 | `volume_threshold_percent` | 60f | 百分比 0-100 |
-| 连续收听阈值 | `continuous_listening_threshold_minutes` | 60 | 分钟 |
-| 音量监测开关 | `volume_monitoring_enabled` | false | - |
-| 睡眠开始时间 | `sleep_start_hour` / `sleep_start_minute` | 22:00 | 时/分 |
-| 睡眠结束时间 | `sleep_end_hour` / `sleep_end_minute` | 07:00 | 时/分 |
-| 睡眠监测开关 | `sleep_monitoring_enabled` | false | - |
-| 分贝校准偏移 | `db_calibration_offset` | 0f | 校准参数 |
-| Lux 估算系数 | `lux_estimation_factor` | 1f | 校准参数 |
-| 后台监测总开关 | `background_monitoring_enabled` | false | - |
-| 上次清理时间戳 | `last_cleanup_timestamp` | 0L | 毫秒 |
+## 许可证
 
-## 版本记录
+版权所有 © 2024 GXR806. 保留所有权利。
 
-### v1.0 - 工程骨架（P0 已完成）
-- 建立工程骨架、四个占位 Tab、依赖版本目录与项目文档
-- 设备启动与完整验收尚未确认
+---
 
-### v1.1 - 数据层骨架
-- ✅ 领域模型：6 个枚举 + 6 个数据类
-- ✅ Room 数据库：6 个 Entity + 6 个 DAO + Database（版本 1）
-- ✅ DataStore 设置：12 个设置项
-- ✅ Repository 仓库：5 个 Repository
-- ✅ 单元测试：3 个 DAO 测试（21 个测试方法）
-- ✅ 编译通过：Room schema 导出成功
-- ✅ 版本升级：Kotlin 2.0.21 + Room 2.7.0-alpha12
-
-### v1.2 - 权限、通知、前台服务框架
-- ✅ 权限管理：PermissionManager + Compose 封装 + 三态处理
-- ✅ 权限引导 UI：PermissionRationaleDialog + 系统设置跳转
-- ✅ 通知基础设施：NotificationHelper + 2 个通知渠道
-- ✅ 前台服务：EnvMonitorService + Android 12-14 版本兼容
-- ✅ 全局状态：MonitorState + AppResult
-- ✅ 首页 UI：HomeScreen + 监测按钮 + 权限流程
-- ✅ 编译通过：功能完整可运行
-
-### v1.3 - 环境监测模块（当前版本）
-- ✅ P3 噪音检测模块：AudioRecord + A 计权滤波 + 突发噪声检测
-- ✅ P4 光照检测模块：CameraX + Camera2 Interop + 真实 Lux 值计算
-- ✅ 后置摄像头光照采集：通过 CaptureCallback 获取曝光参数
-- ✅ 工程近似公式：lux ≈ (avgLuma/255) × 125 / (exposureTimeSec × iso/100)
-- ✅ 校准常数调整：K = 125（修复室内光照显示偏高问题）
-- ✅ 降级模式回退：曝光参数不可用时使用相对亮度
-- ✅ 环境监测页面：噪音 + 光照双模块实时显示
-- ✅ 数据持久化：每 30 秒自动落库
-
-## 技术债务
-
-- 当前未进行设备验证
-- IDE 可能显示版本或配置更新提示
-- 校准常数（`db_calibration_offset`, `lux_estimation_factor`）当前为占位，后续需实现可配置机制
-
-## 下一步工作
-
-仅在负责人下达明确任务后推进，当前不自定义额外阶段目标，不提前实现采集、分析、通知、权限申请或 UI 功能。
-
-详见 [AGENT.md](AGENT.md) 和 [TODO.md](TODO.md)。
+**最后更新**：2024 年（P5 睡眠环境分析与建议引擎已完成）  
+**下一步**：P6 耳机守护模块
