@@ -94,24 +94,17 @@ class LightMonitor(
      * 停止光照监测
      */
     fun stop() {
-        if (!isRunning) {
-            return
-        }
-        
+        check(android.os.Looper.myLooper() == android.os.Looper.getMainLooper())
         try {
             saveJob?.cancel()
-            saveJob = null
-            
             camera?.stop()
+        } finally {
+            saveJob = null
             camera = null
-            
             latestFrame = null
-            
             isRunning = false
-            LogX.i(TAG, "光照监测已停止")
-        } catch (e: Exception) {
-            LogX.e(TAG, "停止光照监测失败", e)
         }
+        LogX.i(TAG, "光照监测已停止")
     }
     
     /**

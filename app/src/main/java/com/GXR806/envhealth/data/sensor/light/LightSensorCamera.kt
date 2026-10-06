@@ -81,6 +81,8 @@ class LightSensorCamera(
     private var imageAnalysis: ImageAnalysis? = null
     private var isRunning = false
     private var samplingJob: Job? = null
+    private var stopped = false
+    private var analysisExecutor: java.util.concurrent.ExecutorService? = null
     
     // 原子变量存储最新的曝光参数（通过 CaptureCallback 更新）
     private val latestExposureTimeNs = AtomicLong(0L)
@@ -98,9 +100,11 @@ class LightSensorCamera(
             return false
         }
         
+        stopped = false
         try {
             val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
             cameraProviderFuture.addListener({
+                if (stopped) return@addListener
                 try {
                     cameraProvider = cameraProviderFuture.get()
                     setupCamera(scope)
@@ -122,26 +126,25 @@ class LightSensorCamera(
      * 停止光照监测
      */
     fun stop() {
-        if (!isRunning) {
-            return
-        }
-        
+        check(android.os.Looper.myLooper() == android.os.Looper.getMainLooper())
+        // 即使 Provider 尚未返回也禁止延迟回调再次绑定相机。
+        stopped = true
+        isRunning = false
+        samplingJob?.cancel()
+        samplingJob = null
         try {
-            samplingJob?.cancel()
-            samplingJob = null
-            
-            cameraProvider?.unbindAll()
-            cameraProvider = null
-            imageAnalysis = null
-            
-            // 重置曝光参数
-            latestExposureTimeNs.set(0L)
-            latestIso.set(null)
-            
-            isRunning = false
-            LogX.i(TAG, "光照监测已停止")
-        } catch (e: Exception) {
-            LogX.e(TAG, "停止光照监测失败", e)
+            imageAnalysis?.clearAnalyzer()
+        } finally {
+            try {
+                cameraProvider?.unbindAll() // CameraX @MainThread
+            } finally {
+                analysisExecutor?.shutdown()
+                analysisExecutor = null
+                cameraProvider = null
+                imageAnalysis = null
+                latestExposureTimeNs.set(0L)
+                latestIso.set(null)
+            }
         }
     }
     
@@ -190,8 +193,10 @@ class LightSensorCamera(
                 }
             })
             
+            val executor = Executors.newSingleThreadExecutor()
+            analysisExecutor = executor
             imageAnalysis = analysisBuilder.build().apply {
-                setAnalyzer(Executors.newSingleThreadExecutor()) { imageProxy ->
+                setAnalyzer(executor) { imageProxy ->
                     analyzeImage(imageProxy)
                 }
             }

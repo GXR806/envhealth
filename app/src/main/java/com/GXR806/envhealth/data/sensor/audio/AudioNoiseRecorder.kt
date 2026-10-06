@@ -123,28 +123,24 @@ class AudioNoiseRecorder(
      * 停止录音
      */
     fun stop() {
-        if (!isRecording) {
-            return
-        }
-
         isRecording = false
-
-        // 取消录音协程
         recordingJob?.cancel()
         recordingJob = null
-
-        // 停止并释放 AudioRecord
+        val record = audioRecord
+        audioRecord = null
         try {
-            audioRecord?.stop()
-            audioRecord?.release()
-            audioRecord = null
-            LogX.i(TAG, "录音已停止")
+            record?.stop()
         } catch (e: Exception) {
             LogX.e(TAG, "停止录音时出错", e)
+        } finally {
+            try {
+                record?.release()
+            } catch (e: Exception) {
+                LogX.e(TAG, "释放录音器时出错", e)
+            } finally {
+                _noiseFrameFlow.value = null
+            }
         }
-
-        // 清空流
-        _noiseFrameFlow.value = null
     }
 
     /**

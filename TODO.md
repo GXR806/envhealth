@@ -56,11 +56,23 @@
 - [x] 集成到 MainActivity
 - [x] 依赖注入（AppContainer + EnvHealthApplication）
 
-## P6: 耳机守护模块（待实现）
-- [ ] HeadphoneSensor 实现（AudioManager + BroadcastReceiver）
-- [ ] HeadphoneAnalyzer 实现（音量分级 + 佩戴时长统计）
-- [ ] 数据采集流程（集成到 EnvMonitorService）
-- [ ] 耳机守护页面 UI
+## P6: 耳机守护模块（代码及专项单测完成，设备待验证）
+- [x] VolumeMonitor（AudioManager、ContentObserver、AudioDeviceCallback、5s音量/30s播放轮询）
+- [x] HeadphoneUsageTracker（单调计时、暂停排除、2min超时、加权音量、区间持久化）
+- [x] RiskEvaluator（四级、多原因、严格大于阈值）
+- [x] HeadphoneRepository/DAO 已完成区间查询，沿用 schema v1 无迁移
+- [x] AppContainer 与 EnvMonitorService 生命周期接入、用户手动启动/停止
+- [x] P6 生命周期红线修正：停止/销毁无 main runBlocking；Main 立即注销/CameraX解绑，IO释放AudioRecord及最后落库，独立短生命周期scope完成后cancel；共享停止信号/Main串行清理/停止期间禁止重启
+- [x] 修正后重新 assembleDebug 成功、P6专项 6 passed/0 skipped/0 failed（不代表生命周期真机验收）
+- [x] HeadphoneGuardViewModel + HeadphoneGuardScreen 接入四 Tab
+- [x] assembleDebug 编译通过
+- [x] P6 专项 JUnit 6 项通过（无新增依赖/测试基础设施）
+- [~] 全套 :app:testDebugUnitTest：48通过/4失败（原有 AdviceEngineTest 旧阈值/去重断言；P5代码未改）
+- [ ] 真机有线/USB/A2DP 连接及拔出立即结束
+- [ ] 真机音量键、OEM ContentObserver 不通知时刷新兜底
+- [ ] 第三方播放暂停/恢复、2min边界及跨午夜累计
+- [ ] 首页/耳机页/通知停止后落库、注销监听、后台资源释放
+- [ ] 无耳机/未启动/数据库错误状态设备验证
 
 ## P7: 数据保留策略（待实现）
 - [ ] 实现 DataRetentionWorker（WorkManager）
@@ -85,12 +97,14 @@
 - [x] **M2**: 完成噪音监测模块（P3）
 - [x] **M3**: 完成光照监测模块（P4）
 - [x] **M4**: 完成睡眠环境分析与建议引擎（P5）
-- [ ] **M5**: 完成耳机守护模块（P6）
+- [~] **M5**: 耳机守护代码及专项单测完成，真机验收待进行
 - [ ] **M6**: 完成数据保留策略（P7）
 - [ ] **M7**: 完成所有功能并发布（P8-P9）
 
 ---
 
 **当前版本**: v1.4  
-**最后更新**: P5 睡眠环境分析与建议引擎已完成  
-**下一步**: P6 耳机守护模块
+**最后更新**: P6代码及专项测试完成；全套测试4项旧断言失败，设备未验证
+**下一步**: P6设备验收；P7/P8须另行授权
+
+勾选标准：[x] 已实现且相关自动化已过；[~] 部分完成或存在验证阻塞；[ ] 未实现/未验证。P0-P5沿用原验收记录，不代表本次全套自动化全绿。

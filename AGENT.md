@@ -6,7 +6,7 @@
 
 **已完成模块**：P0 工程脚手架、P1 数据层骨架、P2 权限通知服务框架、P3 噪音检测模块、P4 光照检测模块（真实 Lux 值计算）、P5 睡眠环境分析与建议引擎。
 
-**当前未完成**：设备启动验证、耳机守护模块、数据保留策略、自动睡眠判定。
+**当前未完成**：设备启动验证、P6 真机验收、数据保留策略、自动睡眠判定。P6 代码与 6 项专项单测已完成；全套单测 48 通过/4 项原有 AdviceEngineTest 失败，勿声称全套验证通过。
 
 ## 2. 架构总览
 
@@ -229,7 +229,7 @@ Service、Worker、Notification 作为后台任务边界，必须由用户可停
 ## 7. 已知问题 / 技术债
 
 - 四 Tab 当前没有图标
-- 耳机守护模块仍为占位
+- 耳机守护代码已完成，插拔/播放/OEM/停止资源释放等设备验证待进行
 - 数据保留策略（7 天/90 天）未实现
 - 自动睡眠判定未实现
 - 设备验证尚未进行
@@ -259,11 +259,29 @@ Service、Worker、Notification 作为后台任务边界，必须由用户可停
 - ✅ P5 睡眠环境分析与建议引擎
 
 **下一阶段建议**：
-1. **耳机守护模块（P6）**：AudioManager 音量监测 + 耳机路由监听
+1. **P6 设备验收**：按 TODO 中未勾选项验证，不另行扩展功能
 2. **数据保留策略（P7）**：WorkManager 定期清理原始采样（7 天）与聚合报告（90 天）
 3. **自动睡眠判定（P8）**：前台服务周期性检查（每 5 分钟）+ 光照/噪音睡眠检测算法
 4. **历史报告查看**：报告列表页面 + 详情页面
 5. **设置页面**：校准参数配置界面（db_calibration_offset, lux_estimation_factor）
+
+## 11. P6 实施交接（本次 Tech Lead 已授权）
+
+### 目录、命名与架构
+- `data/sensor/volume/VolumeMonitor.kt`：只读 STREAM_MUSIC 当前/max 百分比；Settings.System.CONTENT_URI descendants + ContentObserver；AudioDeviceCallback 有线/USB/A2DP。公开 SDK 无 VOLUME_SETTINGS 常量；5s 音量刷新作为 OEM 漏通知兜底，30s isMusicActive，设备回调额外立即刷新。
+- `domain/analysis/HeadphoneUsageTracker.kt`：纯 Kotlin 串行状态机，elapsedRealtime 单调计时；短暂停顿不计时/不计权重，严格 >120000ms 才结束逻辑会话，拔出/停止立即结束。每个实际播放区间持久化独立记录，短暂停顿恢复仍累加本次。
+- `domain/analysis/RiskEvaluator.kt`：SAFE/LOW/MEDIUM/HIGH；HIGH 优先，中文多原因并存，全部严格 >。>60min且当前播放音量>60%=HIGH；仅>60min=MEDIUM；>80%或7天>40h=HIGH；短时>60%=LOW。百分比不是dB，40h不是WHO安全保证。
+- `data/sensor/volume/HeadphoneGuard.kt`：服务生命周期、Channel单消费者/IO存取、StateFlow快照、异常展示和内存待写重试。暂停即写完成区间，停止注销回调、排队停止、等待落库后取消任务；重复停止共享完成信号。错误停止不阻止释放耳机监听。冷启动读取历史不启动守护。
+- `ui/viewmodel/HeadphoneGuardViewModel.kt` + `ui/screen/HeadphoneGuardScreen.kt`：MVVM，Activity范围ViewModel，通过StateFlow显示连接、音量、加权平均/最大、本次/今日/7天、风险、引导与错误。
+- `AppContainer` 新增 headphoneRepository/headphoneGuard；`EnvMonitorService` 在既有手动监测启动后启动守护，停止与销毁时释放；`MainActivity` 耳机Tab替换占位，跳首页复用授权和启动按钮。无导航库、新服务、权限或依赖。
+
+### 数据与兼容
+实际既有仓库叫 `HeadphoneRepository`，未另外建立 HeadphoneUsageRepository。DAO新增getCompletedIntervals。保持Room版本1/schema/HeadphoneUsageEntity/领域模型不变：id（自增）、startTime（毫秒墙钟）、endTime（startTime+单调实际时长的估算墙钟）、avgVolumePercent（时间加权）、maxVolumePercent、deviceType（WIRED/BLUETOOTH；USB兼容映射WIRED但UI区别显示）。不持久化暂停，区间end-start即实际播放时长；逻辑会话仅内存。今日按本地午夜、7天为滚动168小时半开区间裁剪，加入进行中区间；成功落库项先移出待写列表，再读历史，避免重复计算。未动P5评分、数据库schema、依赖、SDK配置（min26/target34/compile34）。
+
+### 验证证据与限制
+`assembleDebug`最终 Build finished successfully；P6专项 `:app:testDebugUnitTest --tests com.GXR806.envhealth.domain.analysis.HeadphoneGuardTest` 为6 passed/0 skipped/0 failed。首次构建Service的this作用域错误已修复。全套`:app:testDebugUnitTest`为48 passed/4 failed，失败均为AdviceEngineTest旧阈值/去重断言（详见README），未越权修P5代码或测试。没有运行真机验证，TODO设备项仍[ ]。生命周期红线修正后再次assembleDebug成功，P6专项再次6 passed/0 skipped/0 failed；6项仅覆盖纯领域状态机/风险，不是Service线程与销毁竞态测试。本次未重跑全套，48/4为前次记录。
+
+暂停检测/恢复最多约30秒延迟，边界时长与音量权重是估算；多连接输出选择首个支持设备，不保证媒体实际路由；USB存储类型WIRED；未支持SCO/BLE/助听。调墙钟时绝对区间位置是估算但单调时长稳定。普通用户停止在Main立即注销耳机监听、解绑CameraX，直接suspend noiseMonitor.stop（AudioRecord停止/释放在IO，finally保证release），挂起等待最终落库，不阻塞主线程；逐项失败隔离，最终清状态/foreground/stopSelf。onDestroy不再runBlocking：同步注销/解绑后返回，独立短生命周期cleanup scope继续IO释放/落库并自动cancel，不受serviceScope.cancel影响。耳机stop为Main-only即时入口，返回共享Deferred；IO单消费者完成tracker最后落库后在Main统一清理events/consumer/stopSignal，再发布done并cancel自有scope，等待者不参与清理。停止期间不可start，CameraProvider迟到回调不再绑定，分析executor停止。系统强杀进程未必执行销毁，也不保证异步写入完成，当前未完成/未落库区间可能丢失。既有onCreate校准读取runBlocking不属于本次停止/销毁修改范围。数据库错误保留内存待写列表并展示，下次事件/重启守护重试，杀进程会丢未落库部分。查询已完成区间按事件刷新；P7尚未清理，历史量增长需后续授权优化。耳机模块不录音、修改音量或请求WRITE_SETTINGS，但因共用环境服务，仍依赖首页录音/相机/通知权限。聚合耳机记录目标90天，自动清理仍未实现。下一入口是P6设备验收；P7/P8必须另行明确授权。
 
 仅在负责人下达明确任务后推进；当前不自定义额外阶段目标。
 

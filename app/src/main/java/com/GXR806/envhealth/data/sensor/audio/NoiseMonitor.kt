@@ -115,34 +115,28 @@ class NoiseMonitor(
     /**
      * 停止监测
      */
-    suspend fun stop() {
-        // 保存最后一次累积的数据（避免丢失未满30秒的数据）
-        val result = lastSavedResult
-        if (result != null && burstCountInInterval > 0) {
-            LogX.i(TAG, "停止监测前保存最后的数据: 累积 $burstCountInInterval 次突发噪音")
-            saveToDatabase(result, burstCountInInterval)
+    suspend fun stop() = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        // 先释放麦克风，最终数据库写入失败也不能保留采集资源。
+        try {
+            recorder.stop()
+        } finally {
+            analysisJob?.cancel()
+            analysisJob = null
+            saveJob?.cancel()
+            saveJob = null
         }
-        
-        // 停止录音器
-        recorder.stop()
-
-        // 取消分析协程
-        analysisJob?.cancel()
-        analysisJob = null
-
-        // 取消保存协程
-        saveJob?.cancel()
-        saveJob = null
-
-        // 重置分析器
-        analyzer.reset()
-
-        // 清空流
-        _analysisResultFlow.value = null
-        lastSavedResult = null
-        burstCountInInterval = 0
-        lastBurstTimestamp = 0L
-
+        try {
+            val result = lastSavedResult
+            if (result != null && burstCountInInterval > 0) {
+                saveToDatabase(result, burstCountInInterval)
+            }
+        } finally {
+            analyzer.reset()
+            _analysisResultFlow.value = null
+            lastSavedResult = null
+            burstCountInInterval = 0
+            lastBurstTimestamp = 0L
+        }
         LogX.i(TAG, "噪音监测已停止")
     }
 

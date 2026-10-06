@@ -15,6 +15,9 @@ class HeadphoneRepository(
     private val headphoneUsageDao: HeadphoneUsageDao
 ) {
     
+    suspend fun getCompletedIntervals(): List<HeadphoneUsage> =
+        headphoneUsageDao.getCompletedIntervals().map { it.toDomain() }
+
     /**
      * 插入耳机使用记录
      */

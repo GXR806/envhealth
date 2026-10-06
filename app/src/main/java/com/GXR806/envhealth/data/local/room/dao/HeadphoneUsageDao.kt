@@ -38,6 +38,10 @@ interface HeadphoneUsageDao {
     @Query("SELECT * FROM headphone_usage WHERE endTime IS NULL ORDER BY startTime DESC")
     fun getOngoingUsages(): Flow<List<HeadphoneUsageEntity>>
     
+    /** 查询全部已完成的播放区间，交由领域层按时间边界裁剪。 */
+    @Query("SELECT * FROM headphone_usage WHERE endTime IS NOT NULL ORDER BY startTime DESC")
+    suspend fun getCompletedIntervals(): List<HeadphoneUsageEntity>
+
     /**
      * 按时间范围查询记录
      */

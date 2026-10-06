@@ -66,12 +66,13 @@ private fun EnvHealthApp() {
         TabContent(
             title = tabTitles[selectedTab],
             modifier = Modifier.padding(innerPadding),
+            onGoHome = { selectedTab = 0 },
         )
     }
 }
 
 @Composable
-private fun TabContent(title: String, modifier: Modifier = Modifier) {
+private fun TabContent(title: String, modifier: Modifier = Modifier, onGoHome: () -> Unit) {
     val context = LocalContext.current
     val app = context.applicationContext as EnvHealthApplication
     
@@ -83,6 +84,16 @@ private fun TabContent(title: String, modifier: Modifier = Modifier) {
         "环境监测" -> {
             // 环境监测页使用真实的 MonitorScreen
             com.GXR806.envhealth.ui.screen.MonitorScreen(modifier = modifier)
+        }
+        "耳机守护" -> {
+            val guardViewModel: com.GXR806.envhealth.ui.viewmodel.HeadphoneGuardViewModel =
+                androidx.lifecycle.viewmodel.compose.viewModel(factory = object : androidx.lifecycle.ViewModelProvider.Factory {
+                    override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T {
+                        @Suppress("UNCHECKED_CAST")
+                        return com.GXR806.envhealth.ui.viewmodel.HeadphoneGuardViewModel(app.appContainer.headphoneGuard) as T
+                    }
+                })
+            com.GXR806.envhealth.ui.screen.HeadphoneGuardScreen(guardViewModel, onGoHome, modifier)
         }
         "报告" -> {
             // 报告页使用真实的 ReportScreen

@@ -39,6 +39,12 @@ class AppContainer(private val context: Context) {
     private val adviceDao by lazy { database.adviceDao() }
     
     // Repositories
+    val headphoneRepository by lazy {
+        com.GXR806.envhealth.data.repository.HeadphoneRepository(database.headphoneUsageDao())
+    }
+    val headphoneGuard by lazy {
+        com.GXR806.envhealth.data.sensor.volume.HeadphoneGuard(context, headphoneRepository)
+    }
     val noiseRepository: NoiseRepository by lazy {
         NoiseRepository(noiseDao)
     }

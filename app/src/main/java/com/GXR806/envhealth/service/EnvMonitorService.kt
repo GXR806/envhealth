@@ -100,6 +100,12 @@ class EnvMonitorService : LifecycleService() {
 
     private val binder = LocalBinder()
     private var isMonitoring = false
+    private var isStopping = false
+    private var isDestroyed = false
+    private var cleanupJob: Job? = null
+    private val headphoneGuard by lazy {
+        (application as com.GXR806.envhealth.EnvHealthApplication).appContainer.headphoneGuard
+    }
 
     // 协程作用域
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -201,7 +207,7 @@ class EnvMonitorService : LifecycleService() {
      * 启动监测
      */
     private fun startMonitoring() {
-        if (isMonitoring) {
+        if (isMonitoring || isStopping || isDestroyed) {
             LogX.w(TAG, "监测已在运行中")
             return
         }
@@ -280,7 +286,7 @@ class EnvMonitorService : LifecycleService() {
                 }
             }
 
-            // TODO: 启动音量监测（AudioManager）
+            headphoneGuard.start()
 
             LogX.i(TAG, "监测服务已启动")
         } catch (e: Exception) {
@@ -293,57 +299,71 @@ class EnvMonitorService : LifecycleService() {
      * 停止监测
      */
     private fun stopMonitoring() {
-        if (!isMonitoring) {
-            LogX.w(TAG, "监测未运行")
-            stopSelf()
-            return
-        }
-
-        try {
-            // 停止数据流订阅
-            dataFlowJob?.cancel()
-            dataFlowJob = null
-            lightDataFlowJob?.cancel()
-            lightDataFlowJob = null
-            
-            // 停止噪音监测（需要在协程中执行以保存最后的数据）
-            runBlocking {
-                noiseMonitor?.stop()
+        if (isStopping || cleanupJob != null) return
+        isStopping = true
+        // 明确拥有的短生命周期作用域，不作为 serviceScope 的子任务。
+        // onDestroy 取消采集任务不会取消最终落库，完成后自动释放该作用域。
+        val cleanupScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+        cleanupJob = cleanupScope.launch {
+            try {
+                dataFlowJob?.cancel()
+                dataFlowJob = null
+                lightDataFlowJob?.cancel()
+                lightDataFlowJob = null
+                val headphoneDone = try {
+                    headphoneGuard.stop() // Main 上立即注销，不等待数据库
+                } catch (e: Exception) {
+                    LogX.e(TAG, "停止耳机监听失败", e)
+                    null
+                }
+                try {
+                    // CameraX unbindAll 必须 Main；在任何 IO 等待前先停止相机。
+                    lightMonitor?.stop()
+                } catch (e: Exception) {
+                    LogX.e(TAG, "停止光照监测失败", e)
+                } finally {
+                    try {
+                        noiseMonitor?.stop() // suspend，绝不 runBlocking
+                    } catch (e: Exception) {
+                        LogX.e(TAG, "停止噪音监测失败", e)
+                    } finally {
+                        try {
+                            headphoneDone?.await()
+                        } catch (e: Exception) {
+                            LogX.e(TAG, "耳机最终落库失败", e)
+                        }
+                    }
+                }
+            } finally {
+                NoiseMonitorState.clear()
+                LightMonitorState.clear()
+                isMonitoring = false
+                MonitorState.setMonitoring(false)
+                try {
+                    ServiceCompat.stopForeground(this@EnvMonitorService, ServiceCompat.STOP_FOREGROUND_REMOVE)
+                } finally {
+                    if (!isDestroyed) stopSelf()
+                    serviceScope.cancel()
+                    cleanupScope.cancel()
+                }
+                LogX.i(TAG, "监测服务已停止")
             }
-            
-            // 停止光照监测
-            lightMonitor?.stop()
-            
-            // 清空全局状态
-            NoiseMonitorState.clear()
-            LightMonitorState.clear()
-
-            // TODO: 停止音量监测
-
-            isMonitoring = false
-            MonitorState.setMonitoring(false)
-
-            // 停止前台服务
-            ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
-            stopSelf()
-
-            LogX.i(TAG, "监测服务已停止")
-        } catch (e: Exception) {
-            LogX.e(TAG, "停止监测失败", e)
         }
     }
 
     override fun onDestroy() {
-        super.onDestroy()
-        
-        // 停止监测
-        if (isMonitoring) {
+        isDestroyed = true
+        // Main.immediate 立即注销耳机和解绑相机，IO 释放录音/最终存储独立继续。
+        try {
             stopMonitoring()
+        } finally {
+            serviceScope.cancel()
+            NoiseMonitorState.clear()
+            LightMonitorState.clear()
+            isMonitoring = false
+            MonitorState.setMonitoring(false)
+            super.onDestroy()
         }
-        
-        // 取消协程作用域
-        serviceScope.cancel()
-        
-        LogX.i(TAG, "服务销毁")
+        LogX.i(TAG, "服务销毁，异步清理继续完成")
     }
 }
