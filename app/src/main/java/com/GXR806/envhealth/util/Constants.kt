@@ -45,13 +45,14 @@ object Constants {
          * 
          * 用于 lux 估算公式：lux ≈ (avgLuma / 255) × K / (exposureTimeSec × (iso / 100))
          * 
-         * 默认值 2500 基于实验估算：
-         * - 室内正常照明（50-300 lux）
-         * - 常见手机摄像头参数（ISO 100-800，曝光时间 1/30-1/60s）
+         * 调整说明：
+         * - 初始值 2500 导致室内开灯环境显示 ~50,000 lux（偏高 100 倍）
+         * - 调整为 125：室内开灯环境 → 250-500 lux（符合实际）
+         * - 典型参考值：室内开灯 100-500 lux，办公室 300-500 lux，阴天室外 1000-2000 lux
          * 
          * 注意：此值为经验值，实际需要通过标准照度计校准
          */
-        const val DEFAULT_LUX_K = 2500f
+        const val DEFAULT_LUX_K = 125f
         
         const val DEFAULT_LUX_ESTIMATION_FACTOR = 1.0f
     }

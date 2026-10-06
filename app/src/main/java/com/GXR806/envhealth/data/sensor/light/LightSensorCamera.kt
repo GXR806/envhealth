@@ -1,6 +1,10 @@
 package com.GXR806.envhealth.data.sensor.light
 
 import android.content.Context
+import android.hardware.camera2.CameraCaptureSession
+import android.hardware.camera2.CaptureRequest
+import android.hardware.camera2.CaptureResult
+import android.hardware.camera2.TotalCaptureResult
 import androidx.camera.camera2.interop.Camera2Interop
 import androidx.camera.camera2.interop.ExperimentalCamera2Interop
 import androidx.camera.core.CameraSelector
@@ -22,21 +26,26 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.launch
 import java.util.concurrent.Executors
-import kotlin.math.max
+import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * 光线传感器（基于摄像头）
  * 
- * 使用 CameraX 估算环境光照强度
+ * 使用 CameraX 估算环境光照强度（lux）
  * 
- * ## 实现原理（降级模式）
+ * ## 实现原理
  * 1. **YUV 亮度采样**：从 YUV_420_888 的 Y 平面计算平均亮度（0-255）
- * 2. **相对亮度指数**：将 avgLuma 映射到 0-100 范围
- * 3. **光照等级判断**：基于相对亮度分级（黑暗/昏暗/适中/明亮）
+ * 2. **曝光参数获取**：通过 Camera2 Interop CaptureCallback 获取 SENSOR_EXPOSURE_TIME（ns）和 SENSOR_SENSITIVITY（ISO）
+ * 3. **Lux 估算公式**（工程近似）：
+ *    ```
+ *    lux ≈ (avgLuma / 255) × K / (exposureTimeSec × (iso / 100))
+ *    ```
+ *    其中 K 为校准常数（默认 2500，基于实验估算）
+ * 4. **光照等级判断**：基于 lux 值分级（黑暗 <5 / 昏暗 5-50 / 适中 50-300 / 明亮 >300）
  * 
- * ## 降级模式说明
- * 当前版本未获取曝光参数（exposureTime、ISO），因此无法精确计算 lux 值。
- * 使用相对亮度指数（0-100）代替，仍可满足基本的光照等级判断需求。
+ * ## 降级模式
+ * 若无法获取曝光参数，退化为相对亮度指数（0-100），仍可提供基本的光照等级判断。
  * 
  * ## 输出频率
  * 1 秒 1 帧（避免频繁计算）
@@ -72,6 +81,10 @@ class LightSensorCamera(
     private var imageAnalysis: ImageAnalysis? = null
     private var isRunning = false
     private var samplingJob: Job? = null
+    
+    // 原子变量存储最新的曝光参数（通过 CaptureCallback 更新）
+    private val latestExposureTimeNs = AtomicLong(0L)
+    private val latestIso = AtomicReference<Int?>(null)
     
     /**
      * 启动光照监测
@@ -121,6 +134,10 @@ class LightSensorCamera(
             cameraProvider = null
             imageAnalysis = null
             
+            // 重置曝光参数
+            latestExposureTimeNs.set(0L)
+            latestIso.set(null)
+            
             isRunning = false
             LogX.i(TAG, "光照监测已停止")
         } catch (e: Exception) {
@@ -136,8 +153,8 @@ class LightSensorCamera(
         val provider = cameraProvider ?: return
         
         try {
-            // 前置摄像头选择器
-            val cameraSelector = CameraSelector.DEFAULT_FRONT_CAMERA
+            // 后置摄像头选择器（按 P4 需求使用后置摄像头）
+            val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
             
             // ImageAnalysis 配置
             val analysisBuilder = ImageAnalysis.Builder()
@@ -145,12 +162,33 @@ class LightSensorCamera(
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                 .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_YUV_420_888)
             
-            // Camera2 扩展配置
+            // Camera2 扩展配置（启用自动曝光 + CaptureCallback 监听曝光参数）
             val camera2Interop = Camera2Interop.Extender(analysisBuilder)
             camera2Interop.setCaptureRequestOption(
-                android.hardware.camera2.CaptureRequest.CONTROL_AE_MODE,
-                android.hardware.camera2.CaptureRequest.CONTROL_AE_MODE_ON
+                CaptureRequest.CONTROL_AE_MODE,
+                CaptureRequest.CONTROL_AE_MODE_ON
             )
+            
+            // 设置 CaptureCallback 监听曝光参数
+            camera2Interop.setSessionCaptureCallback(object : CameraCaptureSession.CaptureCallback() {
+                override fun onCaptureCompleted(
+                    session: CameraCaptureSession,
+                    request: CaptureRequest,
+                    result: TotalCaptureResult
+                ) {
+                    super.onCaptureCompleted(session, request, result)
+                    
+                    // 获取曝光时间（ns）
+                    result.get(CaptureResult.SENSOR_EXPOSURE_TIME)?.let { exposureTime ->
+                        latestExposureTimeNs.set(exposureTime)
+                    }
+                    
+                    // 获取 ISO 感光度
+                    result.get(CaptureResult.SENSOR_SENSITIVITY)?.let { iso ->
+                        latestIso.set(iso)
+                    }
+                }
+            })
             
             imageAnalysis = analysisBuilder.build().apply {
                 setAnalyzer(Executors.newSingleThreadExecutor()) { imageProxy ->
@@ -169,7 +207,7 @@ class LightSensorCamera(
             // 启动定时采样（1 秒 1 帧）
             startSampling(scope)
             
-            LogX.i(TAG, "摄像头已绑定 - 分辨率: ${TARGET_WIDTH}x${TARGET_HEIGHT}")
+            LogX.i(TAG, "摄像头已绑定 - 分辨率: ${TARGET_WIDTH}x${TARGET_HEIGHT}，使用后置摄像头")
         } catch (e: Exception) {
             LogX.e(TAG, "设置摄像头失败", e)
         }
@@ -200,21 +238,35 @@ class LightSensorCamera(
             // 计算平均亮度
             val avgLuma = calculateAvgLuma(yBuffer, ySize)
             
-            // 降级模式：不获取曝光参数，使用相对亮度指数
+            // 从原子变量读取最新的曝光参数
+            val exposureTimeNs = latestExposureTimeNs.get()
+            val iso = latestIso.get()
+            
+            // 计算 Lux 估算值
+            var estimatedLux: Float? = null
+            if (exposureTimeNs > 0 && iso != null && iso > 0) {
+                estimatedLux = calculateLux(avgLuma, exposureTimeNs, iso)
+            }
+            
+            // 计算相对亮度（0-100）
             val relativeBrightness = (avgLuma / 255f) * 100f
             
-            // 判断光照等级（基于相对亮度）
-            val level = LightLevel.fromRelativeBrightness(relativeBrightness)
+            // 判断光照等级
+            val level = if (estimatedLux != null) {
+                LightLevel.fromLux(estimatedLux)
+            } else {
+                LightLevel.fromRelativeBrightness(relativeBrightness)
+            }
             
             // 发射光照帧
             val frame = LightFrame(
                 timestamp = TimeUtils.nowMillis(),
                 avgLuma = avgLuma,
-                estimatedLux = null, // 降级模式：无法精确估算 lux
+                estimatedLux = estimatedLux,
                 relativeBrightness = relativeBrightness,
                 level = level,
-                exposureTimeNs = null,
-                iso = null
+                exposureTimeNs = if (exposureTimeNs > 0) exposureTimeNs else null,
+                iso = iso
             )
             
             _lightFrameFlow.tryEmit(frame)
@@ -240,5 +292,40 @@ class LightSensorCamera(
         }
         
         return (sum / ySize.toFloat()).coerceIn(0f, 255f)
+    }
+    
+    /**
+     * 计算 Lux 估算值（工程近似公式）
+     * 
+     * 公式：lux ≈ (avgLuma / 255) × K / (exposureTimeSec × (iso / 100))
+     * 
+     * 其中：
+     * - avgLuma：平均亮度（0-255）
+     * - K：校准常数（默认 2500）
+     * - exposureTimeSec：曝光时间（秒）
+     * - iso：ISO 感光度
+     * 
+     * 注意：此公式为工程近似，实际需要通过标准照度计校准
+     * 
+     * @param avgLuma 平均亮度（0-255）
+     * @param exposureTimeNs 曝光时间（ns）
+     * @param iso ISO 感光度
+     * @return 估算的 lux 值
+     */
+    private fun calculateLux(avgLuma: Float, exposureTimeNs: Long, iso: Int): Float {
+        // 将曝光时间从纳秒转换为秒
+        val exposureTimeSec = exposureTimeNs / 1_000_000_000.0
+        
+        // 归一化亮度（0-1）
+        val normalizedLuma = avgLuma / 255f
+        
+        // 归一化 ISO（以 100 为基准）
+        val normalizedIso = iso / 100f
+        
+        // 应用 Lux 估算公式
+        val lux = normalizedLuma * Constants.Light.DEFAULT_LUX_K / (exposureTimeSec.toFloat() * normalizedIso)
+        
+        // 限制在合理范围（0-100000 lux）
+        return lux.coerceIn(0f, 100000f)
     }
 }

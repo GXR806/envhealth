@@ -151,7 +151,7 @@ com.GXR806.envhealth/
 - ✅ 编译通过：Room schema 导出成功
 - ✅ 版本升级：Kotlin 2.0.21 + Room 2.7.0-alpha12
 
-### v1.2 - 权限、通知、前台服务框架（当前版本）
+### v1.2 - 权限、通知、前台服务框架
 - ✅ 权限管理：PermissionManager + Compose 封装 + 三态处理
 - ✅ 权限引导 UI：PermissionRationaleDialog + 系统设置跳转
 - ✅ 通知基础设施：NotificationHelper + 2 个通知渠道
@@ -159,6 +159,16 @@ com.GXR806.envhealth/
 - ✅ 全局状态：MonitorState + AppResult
 - ✅ 首页 UI：HomeScreen + 监测按钮 + 权限流程
 - ✅ 编译通过：功能完整可运行
+
+### v1.3 - 环境监测模块（当前版本）
+- ✅ P3 噪音检测模块：AudioRecord + A 计权滤波 + 突发噪声检测
+- ✅ P4 光照检测模块：CameraX + Camera2 Interop + 真实 Lux 值计算
+- ✅ 后置摄像头光照采集：通过 CaptureCallback 获取曝光参数
+- ✅ 工程近似公式：lux ≈ (avgLuma/255) × 125 / (exposureTimeSec × iso/100)
+- ✅ 校准常数调整：K = 125（修复室内光照显示偏高问题）
+- ✅ 降级模式回退：曝光参数不可用时使用相对亮度
+- ✅ 环境监测页面：噪音 + 光照双模块实时显示
+- ✅ 数据持久化：每 30 秒自动落库
 
 ## 技术债务
 

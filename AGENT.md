@@ -2,7 +2,7 @@
 
 ## 1. 当前阶段与进度
 
-**P4 光照检测模块已完成**：实现实时环境光照检测（降级模式），使用前置摄像头采集 YUV 亮度数据，映射为相对亮度指数（0-100%），集成到前台服务。编译通过，功能完整可运行。
+**P4 光照检测模块已完成**：实现实时环境光照检测（支持真实 Lux 值计算），使用后置摄像头采集 YUV 亮度数据并通过 Camera2 Interop 获取曝光参数（SENSOR_EXPOSURE_TIME 和 SENSOR_SENSITIVITY），应用工程近似公式计算真实 Lux 值。降级模式作为回退方案。编译通过，功能完整可运行。
 
 **已完成模块**：P0 工程脚手架、P1 数据层骨架、P2 权限通知服务框架、P3 噪音检测模块、P4 光照检测模块。
 
@@ -308,13 +308,25 @@ NotificationHelper.createNotificationChannels(this)
 ## 10.4 光照检测模块（P4 已完成）
 
 ### 核心实现
-- **LightSensorCamera**：CameraX 光照采集（降级模式）
-  - **摄像头选择**：使用前置摄像头（`CameraSelector.DEFAULT_FRONT_CAMERA`）
-    - 原因：前置摄像头朝向用户，更准确反映用户所处环境的光照
+- **LightSensorCamera**：CameraX 光照采集（支持真实 Lux 值计算）
+  - **摄像头选择**：使用后置摄像头（`CameraSelector.DEFAULT_BACK_CAMERA`）
+    - 原因：符合 P4 原始需求，后置摄像头光线传感器更准确
   - 分辨率：640x480
   - 格式：YUV_420_888
   - 采样频率：1 秒 1 帧
-  - **降级模式**：仅使用 YUV Y 平面平均亮度（0-255）映射为相对亮度（0-100%）
+  - **曝光参数获取**：通过 Camera2 Interop `SessionCaptureCallback` 监听 `SENSOR_EXPOSURE_TIME`（ns）和 `SENSOR_SENSITIVITY`（ISO）
+  - **Lux 估算公式**（工程近似）：
+    ```
+    lux ≈ (avgLuma / 255) × K / (exposureTimeSec × (iso / 100))
+    ```
+    其中 K 为校准常数（默认 125，经实测调整）
+  - **光照等级判断**：基于真实 Lux 值分级
+    - DARK：< 5 lux
+    - DIM：5-50 lux
+    - MODERATE：50-300 lux
+    - BRIGHT：> 300 lux
+  - **降级模式**：当曝光参数不可用时，自动回退到相对亮度模式（0-100%）
+  - **校准常数调整**：K 值从初始 2500 降至 125，修复室内开灯环境显示 50,000 lux 的问题（现显示 250-500 lux）
 - **LightMonitor**：协调器，每 30 秒保存数据
 - **LightMonitorState**：全局状态单例
 - **MonitorScreen**：UI 集成，显示噪音 + 光照双模块
