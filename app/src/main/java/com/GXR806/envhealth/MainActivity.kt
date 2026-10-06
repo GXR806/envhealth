@@ -16,12 +16,16 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import com.GXR806.envhealth.ui.screen.ReportScreen
 import com.GXR806.envhealth.ui.theme.环境健康Theme
+import com.GXR806.envhealth.ui.viewmodel.ReportViewModel
 
 private val tabTitles = listOf("首页", "环境监测", "耳机守护", "报告")
 
@@ -59,7 +63,7 @@ private fun EnvHealthApp() {
             }
         },
     ) { innerPadding ->
-        PlaceholderPage(
+        TabContent(
             title = tabTitles[selectedTab],
             modifier = Modifier.padding(innerPadding),
         )
@@ -67,7 +71,10 @@ private fun EnvHealthApp() {
 }
 
 @Composable
-private fun PlaceholderPage(title: String, modifier: Modifier = Modifier) {
+private fun TabContent(title: String, modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    val app = context.applicationContext as EnvHealthApplication
+    
     when (title) {
         "首页" -> {
             // 首页使用真实的 HomeScreen
@@ -76,6 +83,21 @@ private fun PlaceholderPage(title: String, modifier: Modifier = Modifier) {
         "环境监测" -> {
             // 环境监测页使用真实的 MonitorScreen
             com.GXR806.envhealth.ui.screen.MonitorScreen(modifier = modifier)
+        }
+        "报告" -> {
+            // 报告页使用真实的 ReportScreen
+            val context = LocalContext.current
+            val viewModel = remember {
+                ReportViewModel(
+                    context = context,
+                    sleepSessionManager = app.appContainer.sleepSessionManager,
+                    generateSleepReportUseCase = app.appContainer.generateSleepReportUseCase,
+                    generateHealthAdviceUseCase = app.appContainer.generateHealthAdviceUseCase,
+                    sleepRepository = app.appContainer.sleepRepository,
+                    adviceRepository = app.appContainer.adviceRepository
+                )
+            }
+            ReportScreen(viewModel = viewModel, modifier = modifier)
         }
         else -> {
             // 其他页面仍为占位

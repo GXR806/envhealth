@@ -153,8 +153,8 @@ class LightSensorCamera(
         val provider = cameraProvider ?: return
         
         try {
-            // 后置摄像头选择器（按 P4 需求使用后置摄像头）
-            val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
+            // 前置摄像头选择器（用于睡眠环境监测）
+            val cameraSelector = CameraSelector.DEFAULT_FRONT_CAMERA
             
             // ImageAnalysis 配置
             val analysisBuilder = ImageAnalysis.Builder()

@@ -97,7 +97,8 @@ class NoiseRepository(
             leqDb = leqDb,
             maxDb = maxDb,
             peakDb = peakDb,
-            isEvent = isEvent
+            isEvent = isEvent,
+            burstCount = burstCount
         )
     }
     
@@ -107,7 +108,8 @@ class NoiseRepository(
             leqDb = leqDb,
             maxDb = maxDb,
             peakDb = peakDb,
-            isEvent = isEvent
+            isEvent = isEvent,
+            burstCount = burstCount
         )
     }
 }

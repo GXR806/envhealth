@@ -31,7 +31,7 @@ import com.GXR806.envhealth.data.local.room.entity.SleepSessionEntity
         HeadphoneUsageEntity::class,
         AdviceEntity::class
     ],
-    version = 1,
+    version = 3,
     exportSchema = true
 )
 abstract class EnvHealthDatabase : RoomDatabase() {

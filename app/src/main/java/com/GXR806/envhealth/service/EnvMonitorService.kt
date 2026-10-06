@@ -262,7 +262,7 @@ class EnvMonitorService : LifecycleService() {
                 noiseMonitor?.analysisResultFlow?.collect { result ->
                     // 更新全局状态供 UI 订阅
                     NoiseMonitorState.updateAnalysisResult(result)
-                    LogX.d(TAG, "噪音数据更新: ${result?.currentDb} dB")
+                    // LogX.d(TAG, "噪音数据更新: ${result?.currentDb} dB")  // 日志已禁用：过于频繁
                 }
             }
 
@@ -275,7 +275,7 @@ class EnvMonitorService : LifecycleService() {
                 lightDataFlowJob = serviceScope.launch {
                     lightMonitor?.lightFrameFlow?.collect { frame ->
                         LightMonitorState.updateLightFrame(frame)
-                        LogX.d(TAG, "光照数据更新: ${frame?.estimatedLux} lux, 亮度: ${frame?.relativeBrightness}%")
+                        // LogX.d(TAG, "光照数据更新: ${frame?.estimatedLux} lux, 亮度: ${frame?.relativeBrightness}%")  // 日志已禁用：过于频繁
                     }
                 }
             }
@@ -306,8 +306,10 @@ class EnvMonitorService : LifecycleService() {
             lightDataFlowJob?.cancel()
             lightDataFlowJob = null
             
-            // 停止噪音监测
-            noiseMonitor?.stop()
+            // 停止噪音监测（需要在协程中执行以保存最后的数据）
+            runBlocking {
+                noiseMonitor?.stop()
+            }
             
             // 停止光照监测
             lightMonitor?.stop()

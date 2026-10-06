@@ -2,7 +2,7 @@
   "formatVersion": 1,
   "database": {
     "version": 1,
-    "identityHash": "b5433e47ac76a8702cf2f4dbd3c4f740",
+    "identityHash": "92ca62feb7b51f3966b1a1afc5b2febb",
     "entities": [
       {
         "tableName": "noise_samples",
@@ -136,7 +136,7 @@
       },
       {
         "tableName": "sleep_reports",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `sessionId` INTEGER NOT NULL, `noiseScore` REAL NOT NULL, `lightScore` REAL NOT NULL, `regularityScore` REAL NOT NULL, `totalScore` REAL NOT NULL, `summary` TEXT NOT NULL, FOREIGN KEY(`sessionId`) REFERENCES `sleep_sessions`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `sessionId` INTEGER NOT NULL, `noiseScore` REAL NOT NULL, `lightScore` REAL NOT NULL, `regularityScore` REAL, `totalScore` REAL NOT NULL, `summary` TEXT NOT NULL, FOREIGN KEY(`sessionId`) REFERENCES `sleep_sessions`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
         "fields": [
           {
             "fieldPath": "id",
@@ -165,8 +165,7 @@
           {
             "fieldPath": "regularityScore",
             "columnName": "regularityScore",
-            "affinity": "REAL",
-            "notNull": true
+            "affinity": "REAL"
           },
           {
             "fieldPath": "totalScore",
@@ -190,12 +189,12 @@
         "indices": [
           {
             "name": "index_sleep_reports_sessionId",
-            "unique": true,
+            "unique": false,
             "columnNames": [
               "sessionId"
             ],
             "orders": [],
-            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_sleep_reports_sessionId` ON `${TABLE_NAME}` (`sessionId`)"
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_sleep_reports_sessionId` ON `${TABLE_NAME}` (`sessionId`)"
           }
         ],
         "foreignKeys": [
@@ -316,7 +315,7 @@
     ],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'b5433e47ac76a8702cf2f4dbd3c4f740')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '92ca62feb7b51f3966b1a1afc5b2febb')"
     ]
   }
 }

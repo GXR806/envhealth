@@ -19,7 +19,7 @@ import androidx.room.PrimaryKey
             onDelete = ForeignKey.CASCADE
         )
     ],
-    indices = [Index(value = ["sessionId"], unique = true)]
+    indices = [Index("sessionId")]
 )
 data class SleepReportEntity(
     @PrimaryKey(autoGenerate = true)
@@ -34,8 +34,8 @@ data class SleepReportEntity(
     /** 光照环境评分（0-100） */
     val lightScore: Float,
     
-    /** 规律性评分（0-100） */
-    val regularityScore: Float,
+    /** 规律性评分（0-100），null 表示数据不足 */
+    val regularityScore: Float?,
     
     /** 综合评分（0-100） */
     val totalScore: Float,

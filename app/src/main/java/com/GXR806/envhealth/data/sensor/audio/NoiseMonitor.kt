@@ -44,6 +44,8 @@ class NoiseMonitor(
     val analysisResultFlow: StateFlow<NoiseAnalysisResult?> = _analysisResultFlow.asStateFlow()
 
     private var lastSavedResult: NoiseAnalysisResult? = null
+    private var burstCountInInterval = 0  // 当前30秒内的突发次数
+    private var lastBurstTimestamp = 0L  // 上次突发噪音的时间戳（用于2秒去重）
 
     /**
      * 开始监测
@@ -71,6 +73,18 @@ class NoiseMonitor(
                     
                     // 保存最新结果（用于定期落库）
                     lastSavedResult = result
+                    
+                    // 累积突发噪音次数（2秒内去重）
+                    if (result.isBurst) {
+                        val now = result.timestamp
+                        if (now - lastBurstTimestamp >= 2000) {
+                            burstCountInInterval++
+                            lastBurstTimestamp = now
+                            LogX.d(TAG, "突发噪音累积: 当前30秒内第 $burstCountInInterval 次（已去重）")
+                        } else {
+                            LogX.d(TAG, "突发噪音去重: 距上次突发 ${now - lastBurstTimestamp} ms < 2000ms，忽略")
+                        }
+                    }
                 }
             }
         }
@@ -80,10 +94,16 @@ class NoiseMonitor(
             while (true) {
                 delay(SAVE_INTERVAL_MS)
                 
-                // 保存到数据库
+                // 保存到数据库（使用累积的实际突发次数）
                 val result = lastSavedResult
                 if (result != null) {
-                    saveToDatabase(result)
+                    saveToDatabase(result, burstCountInInterval)
+                    
+                    // 重置突发计数器
+                    if (burstCountInInterval > 0) {
+                        LogX.i(TAG, "保存噪音数据: 30秒内检测到 $burstCountInInterval 次突发噪音")
+                        burstCountInInterval = 0
+                    }
                 }
             }
         }
@@ -95,7 +115,14 @@ class NoiseMonitor(
     /**
      * 停止监测
      */
-    fun stop() {
+    suspend fun stop() {
+        // 保存最后一次累积的数据（避免丢失未满30秒的数据）
+        val result = lastSavedResult
+        if (result != null && burstCountInInterval > 0) {
+            LogX.i(TAG, "停止监测前保存最后的数据: 累积 $burstCountInInterval 次突发噪音")
+            saveToDatabase(result, burstCountInInterval)
+        }
+        
         // 停止录音器
         recorder.stop()
 
@@ -113,25 +140,31 @@ class NoiseMonitor(
         // 清空流
         _analysisResultFlow.value = null
         lastSavedResult = null
+        burstCountInInterval = 0
+        lastBurstTimestamp = 0L
 
         LogX.i(TAG, "噪音监测已停止")
     }
 
     /**
      * 保存到数据库
+     * 
+     * @param result 噪音分析结果
+     * @param actualBurstCount 这个时间间隔内实际检测到的突发次数
      */
-    private suspend fun saveToDatabase(result: NoiseAnalysisResult) {
+    private suspend fun saveToDatabase(result: NoiseAnalysisResult, actualBurstCount: Int) {
         try {
             val sample = NoiseSample(
                 timestamp = result.timestamp,
                 leqDb = result.leq1s,
                 maxDb = result.l10,
                 peakDb = result.currentDb,
-                isEvent = result.isBurst
+                isEvent = actualBurstCount > 0,  // 是否有突发
+                burstCount = actualBurstCount  // 实际突发次数
             )
 
             repository.insertSample(sample)
-            LogX.d(TAG, "已保存噪音采样: ${result.currentDb} dB")
+            // LogX.d(TAG, "已保存噪音采样: ${result.currentDb} dB")  // 日志已禁用：过于频繁
         } catch (e: Exception) {
             LogX.e(TAG, "保存噪音采样失败", e)
         }

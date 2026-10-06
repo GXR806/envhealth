@@ -195,6 +195,7 @@ class SleepRepository(
     
     private fun SleepReportEntity.toDomain(): SleepReport {
         return SleepReport(
+            id = id,
             sessionId = sessionId,
             noiseScore = noiseScore,
             lightScore = lightScore,
