@@ -32,9 +32,6 @@ class NoiseAnalyzer {
     private val frames1s = ArrayDeque<NoiseFrame>(WINDOW_SIZE_1S)
     private val frames1min = ArrayDeque<NoiseFrame>(WINDOW_SIZE_1MIN)
 
-    // 上一帧（用于突发检测）
-    private var lastFrame: NoiseFrame? = null
-
     /**
      * 添加新的噪音帧进行分析
      *
@@ -127,25 +124,27 @@ class NoiseAnalyzer {
     /**
      * 检测突发噪声事件
      *
-     * 条件：相邻帧差值 > 15dB 且超过阈值
+     * 条件：1秒内最大分贝变化 > 15dB
      *
      * @param currentFrame 当前帧
      * @return 是否为突发噪声
      */
     private fun detectBurst(currentFrame: NoiseFrame): Boolean {
-        val last = lastFrame
-        lastFrame = currentFrame
+        // 1秒窗口数据不足，无法判断
+        if (frames1s.size < 2) return false
 
-        if (last == null) return false
+        // 计算 1 秒内的最小分贝和最大分贝
+        val minDb = frames1s.minOf { it.dbA }
+        val maxDb = frames1s.maxOf { it.dbA }
+        
+        // 计算 1 秒内的最大变化
+        val delta = maxDb - minDb
 
-        // 计算相邻帧差值
-        val delta = currentFrame.dbA - last.dbA
-
-        // 判断是否为突发噪声
-        val isBurst = delta > BURST_THRESHOLD && currentFrame.dbA > Constants.NoiseThreshold.NORMAL_MAX
+        // 判断是否为突发噪声：1秒内变化超过阈值即可
+        val isBurst = delta > BURST_THRESHOLD
 
         if (isBurst) {
-            LogX.i(TAG, "检测到突发噪声: ${currentFrame.dbA} dB (Δ = $delta dB)")
+            LogX.i(TAG, "检测到突发噪声: 当前=${currentFrame.dbA.toInt()} dB, 1秒内变化=${delta.toInt()} dB (${minDb.toInt()}→${maxDb.toInt()})")
         }
 
         return isBurst
@@ -173,7 +172,6 @@ class NoiseAnalyzer {
     fun reset() {
         frames1s.clear()
         frames1min.clear()
-        lastFrame = null
         LogX.i(TAG, "分析器状态已重置")
     }
 }

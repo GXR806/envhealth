@@ -24,29 +24,19 @@ class AdviceEngine(
      * 生成健康建议
      * 
      * @param analysisResult 睡眠分析结果
-     * @return 建议列表（按优先级排序，已去重）
+     * @return 建议列表（按优先级排序）
      */
     suspend fun generateAdvice(analysisResult: SleepAnalyzer.SleepAnalysisResult): List<AdviceItem> {
         try {
-            val now = System.currentTimeMillis()
-            val dedupWindowStart = now - DEDUP_WINDOW_MS
-            
-            // 获取 24 小时内已生成的建议
-            val recentAdvice = adviceRepository.getAdviceSince(dedupWindowStart)
-            val recentRuleIds = recentAdvice.map { it.triggerReason }.toSet()
-            
             // 遍历所有规则，收集匹配的建议
             val generatedAdvice = mutableListOf<AdviceItem>()
             
             for (rule in ADVICE_RULES) {
-                // 检查是否在去重窗口内已触发
-                if (recentRuleIds.contains(rule.id)) {
-                    LogX.d(TAG, "规则 ${rule.id} 在 24 小时内已触发，跳过")
-                    continue
-                }
-                
                 // 检查规则条件
-                if (rule.condition(analysisResult)) {
+                val conditionMet = rule.condition(analysisResult)
+                LogX.d(TAG, "检查规则 [${rule.id}]: 条件${if (conditionMet) "满足" else "不满足"}")
+                
+                if (conditionMet) {
                     val advice = AdviceItem(
                         id = 0L,  // 数据库自动生成
                         category = rule.category,
@@ -56,7 +46,7 @@ class AdviceEngine(
                         triggerReason = rule.id  // 使用规则 ID 作为触发原因
                     )
                     generatedAdvice.add(advice)
-                    LogX.i(TAG, "生成建议: [${rule.id}] ${advice.title}")
+                    LogX.i(TAG, "✅ 生成建议: [${rule.id}] ${advice.title}")
                 }
             }
             
@@ -94,7 +84,7 @@ class AdviceEngine(
             id = "R01",
             category = AdviceCategory.NOISE,
             priority = 5,
-            condition = { it.noiseStats.avgLeq > 45f },
+            condition = { it.noiseStats.avgLeq > 25f },
             titleProvider = { "环境噪音偏高" },
             contentProvider = { result ->
                 "检测到夜间平均噪音为 ${result.noiseStats.avgLeq.roundToInt()} dB，建议使用耳塞或白噪音机，降低夜间噪音干扰。"
@@ -104,7 +94,11 @@ class AdviceEngine(
             id = "R02",
             category = AdviceCategory.NOISE,
             priority = 4,
-            condition = { it.noiseStats.burstCount > 10 },
+            condition = { 
+                val count = it.noiseStats.burstCount
+                LogX.d(TAG, "R02 检查: burstCount=$count (需要 > 5)")
+                count > 5
+            },
             titleProvider = { "突发噪音频繁" },
             contentProvider = { result ->
                 "检测到 ${result.noiseStats.burstCount} 次突发噪音事件，建议排查噪音源（空调、冰箱、窗外等）。"
@@ -124,10 +118,10 @@ class AdviceEngine(
             id = "R13",
             category = AdviceCategory.NOISE,
             priority = 2,
-            condition = { it.noiseStats.avgLeq in 35f..45f },
+            condition = { it.noiseStats.avgLeq in 15f..25f },
             titleProvider = { "噪音适中，可改善" },
             contentProvider = {
-                "环境噪音在可接受范围（35-45 dB），但降低至 30 dB 以下会获得更好的睡眠质量。"
+                "环境噪音在可接受范围（15-25 dB），但继续降低会获得更好的睡眠质量。"
             }
         ),
         

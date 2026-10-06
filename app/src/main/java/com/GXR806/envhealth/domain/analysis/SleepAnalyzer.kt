@@ -99,7 +99,9 @@ class SleepAnalyzer(
         
         val avgLeq = samples.map { it.leqDb }.average().toFloat()
         val maxDb = samples.maxOfOrNull { it.maxDb } ?: 0f
-        val burstCount = samples.count { it.isEvent }
+        val burstCount = samples.sumOf { it.burstCount }  // 累加所有样本的实际突发次数
+        
+        LogX.i(TAG, "噪音统计: 样本数=${samples.size}, 平均=${avgLeq.toInt()}dB, 峰值=${maxDb.toInt()}dB, 突发次数=$burstCount")
         
         return NoiseStats(
             avgLeq = avgLeq,
@@ -115,14 +117,14 @@ class SleepAnalyzer(
      * noiseScore = 100 - (avgLeqPenalty + maxDbPenalty + burstEventPenalty)
      * 
      * 其中：
-     * - avgLeqPenalty = min((avgLeq - 30) * 2, 40)      // 平均分贝惩罚（权重 40%）
-     * - maxDbPenalty = min((maxDb - 50) * 1, 30)         // 峰值分贝惩罚（权重 30%）
-     * - burstEventPenalty = min(burstCount * 3, 30)      // 突发事件惩罚（权重 30%）
+     * - avgLeqPenalty = min((avgLeq - 20) * 3.0, 50)     // 平均分贝惩罚（权重 50%，基线 20dB，更敏感）
+     * - maxDbPenalty = min((maxDb - 35) * 1.5, 30)       // 峰值分贝惩罚（权重 30%，基线 35dB，更敏感）
+     * - burstEventPenalty = min(burstCount * 4.0, 20)    // 突发事件惩罚（权重 20%，更敏感）
      */
     private fun calculateNoiseScore(stats: NoiseStats): Float {
-        val avgLeqPenalty = min((stats.avgLeq - 30f) * 2f, 40f).coerceAtLeast(0f)
-        val maxDbPenalty = min((stats.maxDb - 50f) * 1f, 30f).coerceAtLeast(0f)
-        val burstEventPenalty = min(stats.burstCount * 3f, 30f)
+        val avgLeqPenalty = min((stats.avgLeq - 20f) * 3.0f, 50f).coerceAtLeast(0f)
+        val maxDbPenalty = min((stats.maxDb - 35f) * 1.5f, 30f).coerceAtLeast(0f)
+        val burstEventPenalty = min(stats.burstCount * 4.0f, 20f)
         
         val score = 100f - (avgLeqPenalty + maxDbPenalty + burstEventPenalty)
         return score.coerceIn(0f, 100f)
@@ -202,14 +204,22 @@ class SleepAnalyzer(
      * lightScore = 100 - (avgLuxPenalty + fluctuationPenalty + preSleepTrendPenalty)
      * 
      * 其中：
-     * - avgLuxPenalty = min((avgLux - 5) * 1.5, 40)      // 平均光照惩罚（权重 40%）
-     * - fluctuationPenalty = min(stdDevLux * 2, 30)      // 波动惩罚（权重 30%）
-     * - preSleepTrendPenalty = 30 if 睡前1h未下降 else 0 // 睡前趋势惩罚（权重 30%）
+     * - avgLuxPenalty = min((avgLux - 2) * 2.5, 50)      // 平均光照惩罚（权重 50%，基线 2 lux，更敏感）
+     * - fluctuationPenalty = min(stdDevLux * 3.0, 30)    // 波动惩罚（权重 30%，更敏感）
+     * - preSleepTrendPenalty = 20 if 睡前1h未下降 else 0 // 睡前趋势惩罚（权重 20%）
+     * 
+     * 特殊情况：如果 avgLux = 0（无数据），返回默认惩罚分 88（表示数据不足）
      */
     private fun calculateLightScore(stats: LightStats): Float {
-        val avgLuxPenalty = min((stats.avgLux - 5f) * 1.5f, 40f).coerceAtLeast(0f)
-        val fluctuationPenalty = min(stats.stdDevLux * 2f, 30f)
-        val preSleepTrendPenalty = if (!stats.preSleepTrendDecreasing) 30f else 0f
+        // 修复 Bug：如果 avgLux = 0，说明没有有效光照数据
+        if (stats.avgLux == 0f) {
+            LogX.w(TAG, "光照数据不足，返回默认分数 88")
+            return 88f  // 数据不足默认分（高于 70，避免误判）
+        }
+        
+        val avgLuxPenalty = min((stats.avgLux - 2f) * 2.5f, 50f).coerceAtLeast(0f)
+        val fluctuationPenalty = min(stats.stdDevLux * 3.0f, 30f)
+        val preSleepTrendPenalty = if (!stats.preSleepTrendDecreasing) 20f else 0f
         
         val score = 100f - (avgLuxPenalty + fluctuationPenalty + preSleepTrendPenalty)
         return score.coerceIn(0f, 100f)

@@ -97,14 +97,17 @@ Service、Worker、Notification 作为后台任务边界，必须由用户可停
 - [`SleepAnalyzer.kt`](app/src/main/java/com/GXR806/envhealth/domain/analysis/SleepAnalyzer.kt)：
   - **噪音评分（0-100）**：
     - 公式：`noiseScore = 100 - (avgLeqPenalty + maxDbPenalty + burstEventPenalty)`
-    - avgLeqPenalty = min((avgLeq - 30) * 2, 40)
-    - maxDbPenalty = min((maxDb - 50) * 1, 30)
-    - burstEventPenalty = min(burstCount * 3, 30)
+    - avgLeqPenalty = min((avgLeq - 20) * 3.0, 50)      // 基线 20dB，权重 50%（✅ 更敏感）
+    - maxDbPenalty = min((maxDb - 35) * 1.5, 30)         // 基线 35dB，权重 30%（✅ 更敏感）
+    - burstEventPenalty = min(burstCount * 4.0, 20)      // 权重 20%（✅ 更敏感）
+    - **突发噪声检测**：相邻帧差值 > 15dB 且超过阈值，计为一次突发事件
   - **光照评分（0-100）**：
     - 公式：`lightScore = 100 - (avgLuxPenalty + fluctuationPenalty + preSleepTrendPenalty)`
-    - avgLuxPenalty = min((avgLux - 5) * 1.5, 40)
-    - fluctuationPenalty = min(stdDevLux * 2, 30)
-    - preSleepTrendPenalty = 30 if 睡前1h未下降 else 0
+    - avgLuxPenalty = min((avgLux - 2) * 2.5, 50)       // 基线 2 lux，权重 50%（✅ 更敏感）
+    - fluctuationPenalty = min(stdDevLux * 3.0, 30)     // 权重 30%（✅ 更敏感）
+    - preSleepTrendPenalty = 20 if 睡前1h未下降 else 0 // 权重 20%
+    - **Bug修复**：avgLux = 0 时返回默认分 88（避免误判为 70 分）
+    - **光照采集**：使用前置摄像头进行监测
   - **规律性评分（0-100）**：
     - 公式：`regularityScore = 100 - sleepTimeStdDevPenalty`
     - sleepTimeStdDevPenalty = min(stdDevHours * 20, 100)
@@ -115,10 +118,14 @@ Service、Worker、Notification 作为后台任务边界，必须由用户可停
 
 ### 4.6 建议引擎（domain/analysis）
 - [`AdviceEngine.kt`](app/src/main/java/com/GXR806/envhealth/domain/analysis/AdviceEngine.kt)：
-  - **规则表驱动**：12+ 条规则
-  - **去重策略**：同一规则 ID 在 24 小时内只触发一次
+  - **规则表驱动**：13 条规则（R01-R08, R11-R15）
+  - **去重策略**：❌ 已取消 24 小时去重限制，每次生成报告时重新评估所有规则
   - **规则分类**：
     - 噪音相关：R01-R03, R13（4 条）
+      - R01: avgLeq > 25 dB（✅ 已调整为 25dB，更灵敏）
+      - R02: burstCount > 5（✅ 已调整为 5 次，更灵敏）
+      - R03: maxDb > 70 dB
+      - R13: avgLeq in 15-25 dB（✅ 已调整为 15-25 dB）
     - 光照相关：R04-R07（4 条）
     - 规律性相关：R08（1 条）
     - 综合评分：R11-R12, R14（3 条）
@@ -168,14 +175,14 @@ Service、Worker、Notification 作为后台任务边界，必须由用户可停
 1. **开始睡眠会话**：用户点击"开始监测" → SleepSessionManager.startManualSession() → 创建 SleepSession（ONGOING）
 2. **结束睡眠会话**：用户点击"结束监测" → SleepSessionManager.endSession() → 更新 SleepSession（COMPLETED）
 3. **生成报告**：GenerateSleepReportUseCase → SleepAnalyzer.analyze() → 计算三维评分 → 保存 SleepReport
-4. **生成建议**：GenerateHealthAdviceUseCase → AdviceEngine.generateAdvice() → 匹配规则表 → 去重 → 保存 AdviceItem
+4. **生成建议**：GenerateHealthAdviceUseCase → AdviceEngine.generateAdvice() → 匹配规则表 → 保存 AdviceItem（已取消去重）
 5. **UI 展示**：ReportScreen 订阅 ViewModel StateFlow → 显示评分 + 建议列表
 
 ### 5.2 评分算法关键参数
 - **噪音基准**：
-  - 安静阈值：30 dB
-  - 噪音峰值阈值：50 dB
-  - 突发事件阈值：10 次
+  - 评分基线：20 dB（✅ 已调整为 20dB，更灵敏）
+  - 噪音峰值阈值：35 dB（✅ 已调整为 35dB，更灵敏）
+  - 突发噪声检测：1秒内最大分贝变化 > 15 dB（✅ 已移除分贝阈值限制）
 - **光照基准**：
   - 黑暗阈值：5 lux
   - 光照波动阈值：20 lux 标准差

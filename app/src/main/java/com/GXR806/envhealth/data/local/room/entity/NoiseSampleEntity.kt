@@ -25,5 +25,8 @@ data class NoiseSampleEntity(
     val peakDb: Float,
     
     /** 是否为噪音事件（超过阈值） */
-    val isEvent: Boolean
+    val isEvent: Boolean,
+    
+    /** 突发噪音次数（该采样周期内检测到的实际突发次数） */
+    val burstCount: Int = 0
 )
