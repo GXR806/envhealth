@@ -2,6 +2,10 @@ package com.GXR806.envhealth.ui.screen
 
 import android.Manifest
 import android.os.Build
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -42,9 +46,16 @@ import com.google.accompanist.permissions.ExperimentalPermissionsApi
  */
 @OptIn(ExperimentalPermissionsApi::class)
 @Composable
-fun HomeScreen(modifier: Modifier = Modifier, onSettings: () -> Unit = {}) {
+fun HomeScreen(modifier: Modifier = Modifier, onSettings: () -> Unit = {}, active: Boolean = true) {
     val context = LocalContext.current
     val container = (context.applicationContext as com.GXR806.envhealth.EnvHealthApplication).appContainer
+    val dashboard: com.GXR806.envhealth.ui.viewmodel.DashboardViewModel =
+        androidx.lifecycle.viewmodel.compose.viewModel(factory = object : androidx.lifecycle.ViewModelProvider.Factory {
+            override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T {
+                @Suppress("UNCHECKED_CAST")
+                return com.GXR806.envhealth.ui.viewmodel.DashboardViewModel(container) as T
+            }
+        })
     val settings by container.settingsRepository.snapshot.collectAsState(com.GXR806.envhealth.data.local.datastore.SettingsSnapshot())
     val blocked by container.maintenanceGate.blocked.collectAsState()
     val isMonitoring by MonitorState.isMonitoring.collectAsState()
@@ -59,14 +70,14 @@ fun HomeScreen(modifier: Modifier = Modifier, onSettings: () -> Unit = {}) {
     // 仅本次可见页面的明确开始点击可在授权返回后启动，返回首页不自动采集。
     var pendingUserStart by remember { mutableStateOf(false) }
     var startError by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(settings.backgroundMonitoringEnabled, blocked, settings.maintenanceState) {
-        if (!settings.backgroundMonitoringEnabled || blocked || settings.maintenanceState.isNotEmpty()) pendingUserStart = false
+    LaunchedEffect(settings.backgroundMonitoringEnabled, blocked, settings.maintenanceState, active) {
+        if (!active || !settings.backgroundMonitoringEnabled || blocked || settings.maintenanceState.isNotEmpty()) pendingUserStart = false
     }
 
     Column(
-        modifier = modifier.fillMaxSize(),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
+        modifier = modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(com.GXR806.envhealth.ui.theme.HealthSpacing.medium),
+        horizontalAlignment = Alignment.Start,
+        verticalArrangement = Arrangement.spacedBy(com.GXR806.envhealth.ui.theme.HealthSpacing.small),
     ) {
         Text(
             text = "环境健康",
@@ -93,7 +104,8 @@ fun HomeScreen(modifier: Modifier = Modifier, onSettings: () -> Unit = {}) {
         if (!settings.backgroundMonitoringEnabled) Text("后台监测默认关闭，请先在设置中明确开启，再手动开始。开启不会自动采集。")
         if (blocked || settings.maintenanceState.isNotEmpty()) Text("数据维护未完成，请在设置中重试清除。")
         Button(
-            enabled = isMonitoring || (settings.backgroundMonitoringEnabled && !blocked && settings.maintenanceState.isEmpty()),
+            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+            enabled = active && (isMonitoring || (settings.backgroundMonitoringEnabled && !blocked && settings.maintenanceState.isEmpty())),
             onClick = {
                 if (isMonitoring) {
                     // 停止监测
@@ -130,7 +142,7 @@ fun HomeScreen(modifier: Modifier = Modifier, onSettings: () -> Unit = {}) {
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        startError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        startError?.let { com.GXR806.envhealth.ui.component.ErrorState(it, { startError = null }) }
         // 权限状态提示
         if (!permissionsState.allPermissionsGranted && !isMonitoring) {
             Text(
@@ -139,10 +151,11 @@ fun HomeScreen(modifier: Modifier = Modifier, onSettings: () -> Unit = {}) {
                 color = MaterialTheme.colorScheme.error
             )
         }
+        com.GXR806.envhealth.ui.component.DashboardCards(dashboard)
     }
 
     // 权限引导对话框
-    if (showPermissionDialog) {
+    if (showPermissionDialog && active) {
         PermissionRationaleDialog(
             permissions = deniedPermissionsList,
             isPermanentlyDenied = isPermanentlyDenied,
@@ -161,8 +174,8 @@ fun HomeScreen(modifier: Modifier = Modifier, onSettings: () -> Unit = {}) {
     }
 
     // 监听权限变化
-    LaunchedEffect(permissionsState.allPermissionsGranted) {
-        if (pendingUserStart && permissionsState.allPermissionsGranted && !isMonitoring && settings.backgroundMonitoringEnabled && !blocked && settings.maintenanceState.isEmpty()) {
+    LaunchedEffect(permissionsState.allPermissionsGranted, active) {
+        if (active && pendingUserStart && permissionsState.allPermissionsGranted && !isMonitoring && settings.backgroundMonitoringEnabled && !blocked && settings.maintenanceState.isEmpty()) {
             pendingUserStart = false
             // 只延续本页明确点击的授权流程。
             if (!EnvMonitorService.startMonitoring(context)) startError = "启动失败：请保持应用在前台重试"

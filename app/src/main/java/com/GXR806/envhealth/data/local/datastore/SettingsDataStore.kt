@@ -32,8 +32,20 @@ class SettingsDataStore(private val context: Context, private val injectedStore:
             backgroundMonitoringEnabled = p[KEY_BACKGROUND_MONITORING_ENABLED] ?: false,
             baselineVersion = p[KEY_BASELINE_VERSION] ?: 0L,
             maintenanceState = p[KEY_MAINTENANCE_STATE] ?: "",
-            lastCleanupTimestamp = p[KEY_LAST_CLEANUP_TIMESTAMP] ?: 0L
+            lastCleanupTimestamp = p[KEY_LAST_CLEANUP_TIMESTAMP] ?: 0L,
+            themeMode = p[KEY_THEME_MODE]?.takeIf { it in setOf(
+                SettingsSnapshot.THEME_MODE_SYSTEM, SettingsSnapshot.THEME_MODE_LIGHT, SettingsSnapshot.THEME_MODE_DARK
+            ) } ?: SettingsSnapshot.THEME_MODE_SYSTEM
         )
+    }
+
+    suspend fun setThemeMode(mode: String) {
+        require(mode in setOf(
+            SettingsSnapshot.THEME_MODE_SYSTEM,
+            SettingsSnapshot.THEME_MODE_LIGHT,
+            SettingsSnapshot.THEME_MODE_DARK
+        ))
+        store.edit { it[KEY_THEME_MODE] = mode }
     }
 
     suspend fun setQuietTimes(startHour: Int, startMinute: Int, endHour: Int, endMinute: Int) {
@@ -55,6 +67,7 @@ class SettingsDataStore(private val context: Context, private val injectedStore:
     }
 
     companion object {
+        private val KEY_THEME_MODE = androidx.datastore.preferences.core.stringPreferencesKey("theme_mode")
         private val KEY_BASELINE_VERSION = longPreferencesKey("reminder_baseline_version")
         private val KEY_MAINTENANCE_STATE = androidx.datastore.preferences.core.stringPreferencesKey("maintenance_state")
         private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "settings")

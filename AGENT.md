@@ -1,8 +1,27 @@
 # AGENT 上下文交接文档
 
+## 最新授权修复：主题选择（优先于下方视觉阶段）
+- 已修 SettingsSnapshot 重复 package、SettingsRepository 遗失 settingsDataStore、SettingsDataStore 遗失 KEY_THEME_MODE。首页设置顶部增加跟随系统/浅色/深色 48dp 单选行；默认 SYSTEM，DataStore持久、非法写入拒绝/非法存储回退 SYSTEM，清除 resetAll 恢复 SYSTEM。
+- SettingsVM.theme 沿既有 operation + maintenanceGate.write。同一 Activity SettingsVM 外提到 Theme 外订阅，Main 解析 LIGHT=false / DARK=true / else=系统；全页面及系统栏样式即时同步，仅重组、不重建服务/Activity、不自动采集。无新依赖/SDK/schema/其他业务改动。
+- 扩展现有隔离 ReminderIntegrationTest：DARK持久及 owner 重开对比、invalid拒绝/存储回退、reset SYSTEM，编译成功未设备执行。assembleDebug、assembleDebugAndroidTest成功；正确包四专项共27通过/0失败/0跳过（8+9+6+4），首次错误维护包过滤只跑23项后已重跑。未重跑全套，原4项AdviceEngineTest失败仍是历史限制。
+- 真机待验收：设置三选即时覆盖全部Tab、系统栏/三键对比度、旋转重启持久、SYSTEM跟随与强制模式不随系统、清除恢复SYSTEM/后台false、服务状态不被切换改变、TalkBack/200%字体/小屏。前次无设备，本轮未部署/截图/connected执行，不得称设备通过。详见README最新修复段。
+
+
+## 最新授权：统一视觉、Dashboard、历史图表与报告（优先级最高）
+
+- 当前新增 DashboardViewModel/HistoryViewModel、HistoryRepository、纯Kotlin HistoryAggregator、HistoryReportRow 查询投影；AppContainer手动DI。四Tab结构保留，MainActivity AnimatedContent 与图标，Home原授权手动流程保留且退场active=false撤销pending，不开启后台自动采集。未新增依赖、实体、schema迁移；Room仍3，P5公式/P6/P7规则未改，P8仍未实现。
+- 固定青绿蓝色板，深浅色MaterialTheme/系统sp字体，Shape8/12/16/24/28dp与Spacing8/16/24dp。Monitor等级色改主题语义色并保持文字等级；统一EmptyState/ErrorState/LoadingSkeleton、数值动画，Canvas不做无限动画。
+- 历史只读链：Noise/Light原BETWEEN传end-1ms；SleepReportDao.getHistory联合会话startTime及完整报告，HistoryReportRow不是实体；HeadphoneUsageDao.getOverlapping查询已结束重叠区间。HistoryRepository四路Flow在Default聚合，HistoryVM维护blocked取消、generation重读，WhileSubscribed离页立即停止且清replay。详细规则见README最新段。
+- 日/周/月为本地自然范围，周一开始、毫秒半开；日实际小时含DST、周月按自然日。可上一/下一与回当前（90日/13周/3月范围限制，不改90天保留）。噪音leqDb算术均值仅趋势；光照<5/5–50/50–300/≥300lux真实采样计数，nullable/非finite排除；耳机区间按桶裁剪毫秒转分钟、有线USB/蓝牙堆叠，仅已持久结束区间；报告以会话开始时间分桶totalScore均值。缺失null不填零不跨缺口连线，采样只存7天故月范围会缺失。
+- 历史列表详情本地id/BackHandler，范围变化/删除/维护失效选中，不缓存旧实体；历史仅展示持久评分摘要，无报告关联的建议不混用。旧最新报告/建议和会话控制保留，ReportViewModel写入gate不动。图表中文逐桶语义描述、heading/单位/缺失说明，新增触控至少48dp；未真机验证。
+- 本轮串行结果：assembleDebug成功；HistoryAggregatorTest8通过/0跳过/0失败；全套69通过/0跳过/4失败（原AdviceEngineTest保持不动）；assembleDebugAndroidTest成功。adb devices空列表，未运行仪器/真机；没有现有@Preview故没有before渲染或截图依赖。不能声称全绿/设备验证。
+- 待验收：深浅色对比度、200%字体/小屏、TalkBack/触控、Tab/详情/旋转、图表日期边界/错误重试/部分缺失、长期采样性能、动画退场权限回调不启动、清除后Dashboard/图表/详情缓存不复活；上一授权全部P6/P7/提醒/维护设备项仍待验收。
+- 本节与README最新段优先于下方“未实现历史报告”、旧61/4、Tab无图标等历史描述；不要照抄旧状态。
+
+
 ## 0. 最新授权阶段交接（优先于下方P6历史描述）
 
-本轮已实施设置VM/Screen/首页入口、后台关闭await、完整可重入清除chain、采集与writer全部join、报告链maintenance gate、后台false重置/仅cleanup恢复、BOOT任务恢复、备份排除、TestDriver隔离测试。具体规则与实现详见README最前“本轮授权阶段”和docs/testing.md、docs/security-alignment.md。未实现P8自动睡眠或历史报告；不可擅自加依赖/改P5算法。
+本轮已实施设置VM/Screen/首页入口、后台关闭await、完整可重入清除chain、采集与writer全部join、报告链maintenance gate、后台false重置/仅cleanup恢复、BOOT任务恢复、备份排除、TestDriver隔离测试。具体规则与实现详见README最前“本轮授权阶段”和docs/testing.md、docs/security-alignment.md。未实现P8自动睡眠；历史报告现已由最新视觉阶段实现；不可擅自加依赖/改P5算法。
 
 - 实际Room为**schema v3**，已有destructive fallback；本轮未升级。噪音校准默认**96dB**，实时后续帧更新、Leq最多1min含旧校准。下文v1/0f是旧阶段记录，不得照抄为当前事实。
 - SettingsScreen校准使用可编辑OutlinedTextField数字/小数输入，显示当前持久偏移；保存经SettingsVM operation内toFloatOrNull、finite和0..120校验，非法输入中文错误、不崩溃、不落库。新校准设置/清除维护状态变化同步输入；默认96及后续帧即时生效保持不变。

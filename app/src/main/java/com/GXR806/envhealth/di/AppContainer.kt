@@ -107,6 +107,10 @@ class AppContainer(private val context: Context) {
         AdviceRepository(adviceDao)
     }
     
+    val historyRepository by lazy {
+        com.GXR806.envhealth.data.repository.HistoryRepository(noiseRepository, lightRepository, headphoneRepository, sleepRepository)
+    }
+
     // Domain Layer
     val sleepSessionManager: SleepSessionManager by lazy {
         SleepSessionManager(sleepRepository)

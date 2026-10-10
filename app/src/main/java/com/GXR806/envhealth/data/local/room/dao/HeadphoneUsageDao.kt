@@ -42,6 +42,10 @@ interface HeadphoneUsageDao {
     @Query("SELECT * FROM headphone_usage WHERE endTime IS NOT NULL ORDER BY startTime DESC")
     suspend fun getCompletedIntervals(): List<HeadphoneUsageEntity>
 
+    /** 历史图表读取所有与半开范围重叠的已完成区间，包含跨午夜记录。 */
+    @Query("SELECT * FROM headphone_usage WHERE endTime IS NOT NULL AND startTime < :end AND endTime > :start ORDER BY startTime ASC")
+    fun getOverlapping(start: Long, end: Long): Flow<List<HeadphoneUsageEntity>>
+
     /**
      * 按时间范围查询记录
      */

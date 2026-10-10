@@ -1,5 +1,40 @@
 # 环境健康 - Android 应用
 
+## 本轮授权修复：应用主题选择
+- 入口：首页“设置与数据管理”顶部“应用主题”，48dp 以上单选行提供跟随系统 / 浅色 / 深色。默认 SYSTEM；DataStore `theme_mode` 持久保存，非法写入拒绝、非法存储值读取回退 SYSTEM。
+- SettingsViewModel 沿用 operation + maintenanceGate.write；Activity 范围同一 VM 在 MaterialTheme 外订阅快照，所有 Tab 与设置立即统一主题，系统状态栏/导航栏图标同步。切换只重组，不重建 Activity/服务、不自动开启采集，不阻塞 Main 等待磁盘。
+- 清除全部数据沿用 resetAll，主题恢复跟随系统，后台仍恢复关闭；没有新增依赖、schema、SDK 或校准/提醒/评分业务改动。
+- 扩展既有隔离 ReminderIntegrationTest 设置持久化测试：DARK 保存、释放 owner 后同临时文件重开、非法模式拒绝、非法持久值回退、reset SYSTEM。仪器 APK 已编译，未设备执行。
+- 本轮串行：`:app:assembleDebug` 成功；`:app:assembleDebugAndroidTest` 成功；HistoryAggregatorTest + ReminderPolicyTest + HeadphoneGuardTest + MaintenanceTest **27通过/0跳过/0失败**（8+9+6+4）。首次专项使用错误 MaintenanceTest 包过滤仅23项，随后已用正确包重跑27项。未重跑全套，历史4项 AdviceEngineTest 失败不能称已修复。
+- 真机步骤（待验收）：三选即时切换并浏览全部Tab/设置/返回；检查状态栏与手势/三键导航图标对比度；旋转/重启确认持久；SYSTEM 下切系统深浅、强制 LIGHT/DARK 下切系统仍不变；清除后 SYSTEM/后台false，切换不影响正在运行的手动服务；TalkBack单选状态/48dp触控/200%字体与小屏。前次无连接设备，本轮未执行connected测试、部署或截图，不声称真机通过。
+
+
+## 本轮授权阶段：统一视觉、首页总览与历史可视化（优先于下方历史记录）
+
+### 实现与架构
+- 固定青绿/蓝色健康科技色板，浅色/深色 Material 3；不使用壁纸动态颜色。Color/Type/Shape 拆分，圆角8/12/16/24/28dp、间距8/16/24dp，正文14/16sp、标题18/22/28sp，跟随系统字体缩放。监测页等级颜色改用主题语义色，等级仍由文字区分，不改阈值。
+- 首页保留上方设置、后台授权说明与一键手动开始/停止；下方环境总览、今日耳机时长/风险、最近睡眠评分。DashboardViewModel 读取 NoiseMonitorState/LightMonitorState/HeadphoneGuard StateFlow 与最近报告 Room Flow，报告加载/空/错误重试、耳机历史加载/错误重试分开。开启后台仍不自动采集；AnimatedContent 退场首页显式 active=false，立即撤销待授权启动，防止动画保留旧页面时回归。
+- 四Tab仍使用 Activity 本地状态及手动 ViewModel.Factory；增加带中文描述的图标与 AnimatedContent 页面切换，未加入导航库。历史详情通过本地报告id及 BackHandler 返回，删除/维护后详情失效，不保存旧实体缓存。ReportViewModel 写入链及维护锁未改。
+- HistoryRepository 组合四路只读 Flow → Dispatchers.Default 上 HistoryAggregator 纯 Kotlin 聚合 → HistoryViewModel StateFlow → HistoryChart Canvas。只读新增 SleepReportDao 联合投影 HistoryReportRow（@Embedded原实体 + sessionStartTime），HeadphoneUsageDao 重叠区间查询；AppContainer 手动注入。没有新增实体、列、依赖或数据库迁移，schema保持3。
+- 图表：噪音折线、光照采样分布柱图、有线/USB与蓝牙时长堆叠柱图、睡眠评分折线。数据来自实际持久记录，未插入演示数据。旧会话开始/结束/取消、最新报告与建议仍在报告页保留。历史详情展示总分、三维评分、摘要；AdviceEntity 无报告外键，因此不伪装关联历史建议。
+- EmptyState/ErrorState/LoadingSkeleton 统一三态；加载骨架只做透明度动画，数值使用 animateFloatAsState/animateIntAsState，历史 Canvas 本身不运行无限动画。自定义图表提供逐桶中文语义描述/单位/缺失说明，标题 heading；错误 polite 提示；所有新增点击目标至少48dp。TalkBack与大字体真机尚未验收。
+
+### 查询字段与聚合规则
+- 本地自然日、周一开始自然周、自然月，范围全部为毫秒 `[start,end)`；日按实际小时（夏令时23/25小时），周/月按本地自然日分桶。默认当前范围，可上一/下一范围、回当前；最多回看90个日范围、13个周范围、3个月范围（保留期限仍90天）。每分钟仅检查日期/时区，范围不变不重新订阅。
+- 噪音/光照原DAO使用BETWEEN，历史只读调用传 `end-1ms`，不改原有业务查询。噪音桶内 `leqDb` 算术均值，仅为特征趋势，并非能量法重算声学Leq；光照使用 finite非空 `estimatedLux`，`<5 / 5–50 / 50–300 / ≥300 lux` 采样计数，不是照射时长，降级帧不计。
+- 耳机仅已保存且结束的区间 `startTime < end && endTime > start`，每桶 `max(0,min(endTime,bucketEnd)-max(startTime,bucketStart))` 裁剪，保留毫秒后除60000得到分钟，按 deviceType 分有线（含USB）/蓝牙堆叠；未落库/进行中区间不混入历史。Dashboard今日汇总仍遵守既有P6估算逻辑。
+- 睡眠联合 `sleep_reports.sessionId = sleep_sessions.id`，使用会话 `startTime` 分桶；同桶 `totalScore` 均值，列表按开始时间及报告id倒序。详情使用持久noiseScore/lightScore/regularityScore/totalScore/summary，空规律性显示数据不足。不改P5评分公式。
+- 无记录使用null缺口，折线不跨缺失连接，不填假零。采样仅保留7天，月视图可能部分缺失；报告/耳机保留90天。维护blocked撤销订阅，generation重建查询，离页立即取消订阅并清replay，防止清除后旧读缓存复活。只读链没有新增写入caller。
+
+### 自动化证据与限制
+- 按串行顺序执行 `:app:assembleDebug` 成功 → HistoryAggregatorTest **8通过/0失败/0跳过** → `:app:testDebugUnitTest` **69通过/4失败/0跳过** → `:app:assembleDebugAndroidTest` 成功。
+- 全套4项失败仍为 AdviceEngineTest：edgeCase_noRulesTrigger_shouldReturnEmpty、rule_R13_avgLeqModerate_shouldTrigger、deduplication_recentAdviceExists_shouldSkip、rule_R01_avgLeqNormal_shouldNotTrigger；评分业务及这些旧测试保持不动。不得称全套全绿。
+- 新8项纯JVM测试覆盖日/周/月边界、跨月/闰年、夏令时日、空数据、毫秒半开区间/噪音与评分图表输入、耳机跨午夜裁剪与堆叠、光照降级/非法值。没有新增测试依赖、脆弱像素测试或生产数据写入。
+- 搜索全项目未找到现有 @Preview，未渲染before，也没有为工具添加依赖。`adb devices`仅显示空列表，没有连接设备，因此未运行connectedDebugAndroidTest、部署、截图或操作生产数据。
+- 真机待验收：深浅色对比度/系统字体200%/小屏滚动、TalkBack图表与按钮/48dp触控、切Tab与详情返回/旋转、加载骨架停止、采样与图表一致/跨午夜/DST/清理后缺失、历史读错误重试、采样期间页面流畅度、权限拒绝/永久拒绝/授权中切页不自动启动、后台false/维护清除后旧Dashboard及详情不复活、全部既有P6/P7/提醒/维护设备项。
+- 本阶段没有实现P8，不更改P6/P7规则、SDK、Manifest、Room schema、评分公式或依赖。
+
+
 ## 本轮授权阶段：设置、健康提醒、数据维护（最新交接，优先于下方 P6 历史记录）
 
 ### 已实现
@@ -61,7 +96,7 @@
 - P6 真机验证（代码已实现）
 - 数据保留策略设备验收（P7代码已实现）
 - 自动睡眠判定（P8）
-- 历史报告查看
+- 历史报告详情真机验收（本轮代码已实现）
 - 设置页面设备验收（代码已实现）
 
 ## 技术栈

@@ -11,8 +11,9 @@ import kotlinx.coroutines.flow.Flow
 class SettingsRepository(context: Context, store: androidx.datastore.core.DataStore<androidx.datastore.preferences.core.Preferences>? = null) {
     
     private val settingsDataStore = SettingsDataStore(context.applicationContext, store)
-    val snapshot = settingsDataStore.snapshot
     val reminderStore = ReminderStore(settingsDataStore.store)
+    val snapshot = settingsDataStore.snapshot
+    suspend fun setThemeMode(mode: String) = settingsDataStore.setThemeMode(mode)
     suspend fun setQuietTimes(startHour: Int, startMinute: Int, endHour: Int, endMinute: Int) =
         settingsDataStore.setQuietTimes(startHour, startMinute, endHour, endMinute)
     suspend fun setMaintenanceState(state: String) = settingsDataStore.setMaintenanceState(state)

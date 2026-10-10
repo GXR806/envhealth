@@ -1,5 +1,37 @@
 # 环境健康 - 项目开发清单
 
+## 最新授权修复：主题选择
+- [x] 修复重复package/仓库字段丢失/主题key缺失；设置顶部48dp三选一（跟随系统/浅色/深色）
+- [x] 默认SYSTEM、DataStore持久、非法写入拒绝/非法存储回退SYSTEM；清除reset恢复SYSTEM
+- [x] SettingsVM operation + maintenanceGate.write；Activity Theme外同VM订阅，所有页面/系统栏即时统一，不重建服务、不新增依赖
+- [x] 既有隔离仪器设置测试扩展DARK持久/owner重开、非法拒绝/回退、resetSYSTEM（仅编译）
+- [x] assembleDebug与assembleDebugAndroidTest成功；正确包四专项27通过/0失败/0跳过（首次错误维护包过滤23项后重跑）
+- [~] 未重跑全套；原AdviceEngineTest四失败未改；无本轮仪器/真机通过证据
+- [ ] 真机：首页设置三选→全部Tab/设置即时变化、状态栏/手势/三键导航对比度、旋转与重启持久
+- [ ] 真机：SYSTEM随系统变化、强制LIGHT/DARK不随系统；清除后SYSTEM/后台false，切换不改变手动采集服务状态
+- [ ] 真机：TalkBack单选语义/48dp触控/200%字体/小屏；有设备后执行隔离仪器测试
+
+
+## 最新授权：视觉、Dashboard与历史可视化
+- [x] Color/Type/Shape统一固定青绿蓝色、深浅主题、系统字体、Spacing；监测等级语义色
+- [x] Dashboard手动DI/StateFlow：环境实时、今日耳机时长风险、最近睡眠评分；保留设置与一键手动监测、后台false
+- [x] 四Tab中文图标/AnimatedContent；首页退场active失效授权pending，开启不自动采集
+- [x] 只读历史联合查询/重叠耳机查询，Room schema3不变；HistoryRepository/VM维护generation/block及离页清缓存
+- [x] 纯Kotlin自然日周月/半开毫秒聚合，Canvas四图，无假数据，无新增依赖
+- [x] 历史范围前后浏览/回当前、列表详情/BackHandler；保留旧会话控制和最新报告建议
+- [x] Empty/Error/Loading骨架三态、错误重试、数值动画、Canvas中文语义描述、新增48dp触控
+- [x] HistoryAggregatorTest专项8通过（自然边界、跨月闰年DST、空/毫秒、跨午夜、堆叠与分布输入）
+- [x] assembleDebug / assembleDebugAndroidTest成功
+- [~] 全套69通过/4原AdviceEngineTest失败/0跳过；未改评分或旧断言
+- [~] adb devices无设备；未执行connectedDebugAndroidTest，未部署/截图/生产数据操作；无现有Preview可渲染before
+- [x] README/AGENT/TODO更新架构、字段、聚合、token及真实验证限制
+- [ ] 真机深浅色对比度、200%字体/小屏滚动、TalkBack图表逐桶描述/按钮、触控48dp
+- [ ] 真机日周月前后浏览、历史详情返回/旋转、Room错误重试、真实采样及评分一致、7天缺失与90天保留
+- [ ] 真机授权弹窗中切页/后台false不开硬件、开始停止资源释放、维护清除后旧首页/图表/详情不复活
+- [ ] 真机采样期间页面切换与图表性能、加载动画退出停止、全部之前P6/P7/提醒/维护验收
+- [ ] P8自动睡眠不在本轮范围，仍未实现
+
+
 ## 最新授权阶段：设置/提醒/维护闭环
 - [x] SettingsViewModel/SettingsScreen/Main首页入口，Activity范围VM、阈值/校准/原子静默时段、校验、确认清除
 - [x] 后台默认false，明确授权后手动开始；开启不自动采集；关闭立即停止await；服务非sticky/generation阻断旧启动
@@ -110,7 +142,7 @@
 
 ## P9: 高级功能与优化（待定）
 - [ ] 数据导出功能
-- [ ] 历史报告查看
+- [x] 历史报告查看（本轮只读列表与评分摘要详情；真机验收见顶部）
 - [~] 设置页面已实现（阈值/静默/校准/后台/清除），设备验收待进行；采集频率/保留期限不扩展
 - [ ] 应用图标与启动页
 - [ ] 性能优化与内存管理
