@@ -13,6 +13,7 @@ class SettingsRepository(context: Context, store: androidx.datastore.core.DataSt
     private val settingsDataStore = SettingsDataStore(context.applicationContext, store)
     val reminderStore = ReminderStore(settingsDataStore.store)
     val snapshot = settingsDataStore.snapshot
+    suspend fun acceptPrivacyPolicy() = settingsDataStore.acceptPrivacyPolicy()
     suspend fun setThemeMode(mode: String) = settingsDataStore.setThemeMode(mode)
     suspend fun setQuietTimes(startHour: Int, startMinute: Int, endHour: Int, endMinute: Int) =
         settingsDataStore.setQuietTimes(startHour, startMinute, endHour, endMinute)

@@ -25,7 +25,8 @@ import kotlinx.coroutines.launch
  */
 class NoiseMonitor(
     private val repository: NoiseRepository,
-    calibrationOffset: Float
+    calibrationOffset: Float,
+    private val batch: com.GXR806.envhealth.data.sensor.BoundedSampleBatch<NoiseSample>
 ) {
     companion object {
         private const val TAG = "NoiseMonitor"
@@ -40,6 +41,16 @@ class NoiseMonitor(
     /** 只改变后续帧；Leq 滑动窗口至多 1 分钟含旧校准帧，不修改算法或历史记录。 */
     fun updateCalibrationOffset(value: Float) = recorder.updateCalibrationOffset(value)
 
+    private var lastQueuedTimestamp: Long? = null
+    private suspend fun writeError() {
+        com.GXR806.envhealth.util.MonitorState.reportError("噪音保存失败，已暂停采集；最多3条特征留在内存，请停止重试。进程终止可能丢失。")
+        LogX.e(TAG, "噪音批次写入失败，暂停采集")
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            recorder.stop()
+            recorder.awaitStopped()
+        }
+        analysisJob?.cancel()
+    }
     private var analysisJob: Job? = null
     private var saveJob: Job? = null
 
@@ -65,7 +76,7 @@ class NoiseMonitor(
         }
 
         // 启动分析协程
-        analysisJob = scope.launch {
+        analysisJob = scope.launch(kotlinx.coroutines.Dispatchers.Main.immediate) {
             recorder.noiseFrameFlow.collect { frame ->
                 if (frame != null) {
                     // 分析噪音帧
@@ -93,21 +104,18 @@ class NoiseMonitor(
         }
 
         // 启动定期保存协程
-        saveJob = scope.launch {
+        saveJob = scope.launch(kotlinx.coroutines.Dispatchers.Main.immediate) {
             while (true) {
                 delay(SAVE_INTERVAL_MS)
                 
-                // 保存到数据库（使用累积的实际突发次数）
-                val result = lastSavedResult
-                if (result != null) {
-                    saveToDatabase(result, burstCountInInterval)
-                    
-                    // 重置突发计数器
-                    if (burstCountInInterval > 0) {
-                        LogX.i(TAG, "保存噪音数据: 30秒内检测到 $burstCountInInterval 次突发噪音")
-                        burstCountInInterval = 0
+                try {
+                    val result = lastSavedResult
+                    if (result != null && result.timestamp != lastQueuedTimestamp) {
+                        saveToDatabase(result, burstCountInInterval)
                     }
-                }
+                    batch.flushIfDue()
+                } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+                catch (e: Exception) { writeError(); break }
             }
         }
 
@@ -133,10 +141,12 @@ class NoiseMonitor(
         }
         try {
             val result = lastSavedResult
-            if (result != null && burstCountInInterval > 0) {
+            if (!batch.failed && result != null && result.timestamp != lastQueuedTimestamp) {
                 saveToDatabase(result, burstCountInInterval)
             }
-        } finally {
+            batch.flush()
+        } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+        catch (e: Exception) { writeError() } finally {
             analyzer.reset()
             _analysisResultFlow.value = null
             lastSavedResult = null
@@ -153,21 +163,14 @@ class NoiseMonitor(
      * @param actualBurstCount 这个时间间隔内实际检测到的突发次数
      */
     private suspend fun saveToDatabase(result: NoiseAnalysisResult, actualBurstCount: Int) {
-        try {
-            val sample = NoiseSample(
-                timestamp = result.timestamp,
-                leqDb = result.leq1s,
-                maxDb = result.l10,
-                peakDb = result.currentDb,
-                isEvent = actualBurstCount > 0,  // 是否有突发
-                burstCount = actualBurstCount  // 实际突发次数
-            )
-
-            repository.insertSample(sample)
-            // LogX.d(TAG, "已保存噪音采样: ${result.currentDb} dB")  // 日志已禁用：过于频繁
-        } catch (e: kotlinx.coroutines.CancellationException) { throw e }
-        catch (e: Exception) {
-            LogX.e(TAG, "保存噪音采样失败", e)
+        val sample = NoiseSample(timestamp = result.timestamp, leqDb = result.leq1s,
+            maxDb = result.l10, peakDb = result.currentDb,
+            isEvent = actualBurstCount > 0, burstCount = actualBurstCount)
+        // 已接收到有界批次即更新游标；事务失败时该条仍保留，停止重试不能重复加入。
+        kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+            lastQueuedTimestamp = result.timestamp
+            burstCountInInterval = 0
+            batch.offer(sample)
         }
     }
 

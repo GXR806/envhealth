@@ -59,7 +59,10 @@ class MainActivity : ComponentActivity() {
                         return SettingsViewModel(app.appContainer) as T
                     }
                 })
-            val settings by settingsViewModel.settings.collectAsState()
+            val loadedSettings by settingsViewModel.loadedSettings.collectAsState()
+            val busy by settingsViewModel.busy.collectAsState()
+            val message by settingsViewModel.message.collectAsState()
+            val settings = loadedSettings ?: SettingsSnapshot()
             val systemDark = isSystemInDarkTheme()
             val darkTheme = when (settings.themeMode) {
                 SettingsSnapshot.THEME_MODE_LIGHT -> false
@@ -73,7 +76,10 @@ class MainActivity : ComponentActivity() {
                 )
             }
             环境健康Theme(darkTheme = darkTheme) {
-                EnvHealthApp(settingsViewModel)
+                com.GXR806.envhealth.ui.component.PrivacyConsentContent(loadedSettings,
+                    settingsViewModel::acceptPrivacy, { finishAndRemoveTask() }, busy, message) {
+                    EnvHealthApp(settingsViewModel)
+                }
             }
         }
     }
@@ -111,6 +117,7 @@ private fun EnvHealthApp(settingsViewModel: SettingsViewModel) {
                 modifier = Modifier.padding(innerPadding),
                 onGoHome = { selectedTab = 0 },
                 onSettings = { showSettings = true },
+                onOpenReport = { selectedTab = 3 },
                 active = page == selectedTab && !showSettings,
             )
         }
@@ -118,14 +125,14 @@ private fun EnvHealthApp(settingsViewModel: SettingsViewModel) {
 }
 
 @Composable
-private fun TabContent(title: String, modifier: Modifier = Modifier, onGoHome: () -> Unit, onSettings: () -> Unit, active: Boolean) {
+private fun TabContent(title: String, modifier: Modifier = Modifier, onGoHome: () -> Unit, onSettings: () -> Unit, onOpenReport: () -> Unit, active: Boolean) {
     val context = LocalContext.current
     val app = context.applicationContext as EnvHealthApplication
     
     when (title) {
         "首页" -> {
             // 首页使用真实的 HomeScreen
-            com.GXR806.envhealth.ui.screen.HomeScreen(modifier = modifier, onSettings = onSettings, active = active)
+            com.GXR806.envhealth.ui.screen.HomeScreen(modifier = modifier, onSettings = onSettings, active = active, onOpenReport = onOpenReport)
         }
         "环境监测" -> {
             // 环境监测页使用真实的 MonitorScreen

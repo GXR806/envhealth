@@ -4,6 +4,9 @@ import android.content.Context
 import androidx.room.Room
 import androidx.room.withTransaction
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.sync.withLock
 import com.GXR806.envhealth.data.local.room.EnvHealthDatabase
 import com.GXR806.envhealth.data.repository.AdviceRepository
 import com.GXR806.envhealth.data.repository.LightRepository
@@ -21,10 +24,53 @@ import com.GXR806.envhealth.domain.usecase.GenerateSleepReportUseCase
  * 管理应用级别的单例依赖
  */
 class AppContainer(private val context: Context) {
+    // Process-owned scope: no Activity ownership and no GlobalScope; cancel in close()/Application.onTerminate.
+    private val exceptions = kotlinx.coroutines.CoroutineExceptionHandler { _, failure ->
+        if (failure is Error) {
+            Thread.getDefaultUncaughtExceptionHandler()?.uncaughtException(Thread.currentThread(), failure)
+            throw failure
+        }
+        maintenanceGate.blocked.value = true
+        consentReady.value = false
+        android.util.Log.e("EnvHealth", "应用任务失败，入口保持关闭")
+    }
+    private val owner = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO + exceptions)
+    val consentReady = kotlinx.coroutines.flow.MutableStateFlow(false)
+    fun initializePrivacy() = owner.launch {
+        try {
+            maintenanceGate.mutex.withLock {
+                val settings = settingsRepository.snapshot.first()
+                maintenanceGate.blocked.value = settings.maintenanceState.isNotEmpty()
+                maintenanceGate.generation.value += 1
+                consentReady.value = settings.hasPrivacyConsent
+                if (settings.hasPrivacyConsent && settings.maintenanceState.isEmpty())
+                    com.GXR806.envhealth.worker.ReminderScheduler.restore(context)
+                else com.GXR806.envhealth.worker.ReminderScheduler.cancel(context).result.get()
+            }
+        } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+        catch (e: Exception) { android.util.Log.e("Privacy", "隐私状态读取失败，保持关闭", e) }
+    }
+    fun restoreConsentedWork() { owner.launch {
+        try { maintenanceGate.mutex.withLock {
+            val settings = settingsRepository.snapshot.first()
+            consentReady.value = settings.hasPrivacyConsent
+            if (!maintenanceGate.blocked.value && settings.hasPrivacyConsent && settings.maintenanceState.isEmpty())
+                com.GXR806.envhealth.worker.ReminderScheduler.restore(context)
+        } } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+        catch (e: Exception) { android.util.Log.e("Privacy", "周期恢复失败", e) }
+    } }
+    fun close() { owner.cancel() }
+
     
     val settingsRepository by lazy { com.GXR806.envhealth.data.repository.SettingsRepository(context) }
     val maintenanceGate = com.GXR806.envhealth.worker.MaintenanceGate()
+    val reminderDiagnostics = kotlinx.coroutines.flow.MutableStateFlow<Map<String, String>>(emptyMap())
     val reminderRuntime by lazy { object : com.GXR806.envhealth.worker.ReminderRuntime {
+        override fun diagnostic(type: com.GXR806.envhealth.domain.analysis.ReminderPolicy.Type?, reason: String) {
+            val key = type?.name ?: "ALL"
+            val time = java.time.Instant.ofEpochMilli(now()).atZone(java.time.ZoneId.systemDefault()).toLocalDateTime()
+            reminderDiagnostics.value = reminderDiagnostics.value + (key to "$time：$reason")
+        }
         override val gate get() = maintenanceGate
         override val store get() = settingsRepository.reminderStore
         override val sink = object : com.GXR806.envhealth.worker.ReminderNotificationSink {
@@ -95,6 +141,11 @@ class AppContainer(private val context: Context) {
         NoiseRepository(noiseDao)
     }
     
+    // 进程拥有的小批次：Service销毁不丢失败待写；清除在stop/join后显式discard。
+    val noiseBatch by lazy { com.GXR806.envhealth.data.sensor.BoundedSampleBatch<com.GXR806.envhealth.domain.model.NoiseSample>(
+        { android.os.SystemClock.elapsedRealtime() }, noiseRepository::insertSamples) }
+    val lightBatch by lazy { com.GXR806.envhealth.data.sensor.BoundedSampleBatch<com.GXR806.envhealth.domain.model.LightSample>(
+        { android.os.SystemClock.elapsedRealtime() }, lightRepository::insertSamples) }
     val lightRepository: LightRepository by lazy {
         LightRepository(lightDao)
     }

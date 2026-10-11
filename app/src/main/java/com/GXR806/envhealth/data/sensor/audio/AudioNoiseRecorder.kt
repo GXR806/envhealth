@@ -137,7 +137,8 @@ class AudioNoiseRecorder(
     }
     fun stop() {
         isRecording = false
-        stoppedRecordingJob = recordingJob
+        // 重复stop不能覆盖仍需join的旧录音任务（写入失败暂停后用户stop）。
+        if (recordingJob != null) stoppedRecordingJob = recordingJob
         recordingJob?.cancel()
         recordingJob = null
         val record = audioRecord
@@ -209,7 +210,7 @@ class AudioNoiseRecorder(
         val dbSpl = dbFs + offset
 
         // 4. A 计权处理
-        val rmsA = aWeightingFilter.processAndCalculateRMS(samples.copyOf(count))
+        val rmsA = aWeightingFilter.processAndCalculateRMS(samples, count)
         val dbFsA = rmsToDbFS(rmsA.toFloat())
         val dbA = dbFsA + offset
 

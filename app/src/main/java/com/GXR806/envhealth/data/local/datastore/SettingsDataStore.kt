@@ -21,6 +21,7 @@ class SettingsDataStore(private val context: Context, private val injectedStore:
     val store: DataStore<Preferences> get() = injectedStore ?: context.dataStore
     val snapshot: Flow<SettingsSnapshot> = store.data.map { p ->
         SettingsSnapshot(
+            privacyConsentVersion = p[KEY_PRIVACY_CONSENT_VERSION] ?: 0,
             noiseThresholdDb = p[KEY_NOISE_THRESHOLD_DB] ?: DEFAULT_NOISE_THRESHOLD_DB,
             volumeThresholdPercent = p[KEY_VOLUME_THRESHOLD_PERCENT] ?: DEFAULT_VOLUME_THRESHOLD_PERCENT,
             continuousListeningThresholdMinutes = p[KEY_CONTINUOUS_LISTENING_THRESHOLD_MINUTES] ?: DEFAULT_CONTINUOUS_LISTENING_THRESHOLD_MINUTES,
@@ -66,7 +67,15 @@ class SettingsDataStore(private val context: Context, private val injectedStore:
         store.edit { it.clear(); it[KEY_BACKGROUND_MONITORING_ENABLED] = false }
     }
 
+    suspend fun acceptPrivacyPolicy() {
+        store.edit {
+            check((it[KEY_MAINTENANCE_STATE] ?: "").isEmpty()) { "数据维护未完成" }
+            it[KEY_PRIVACY_CONSENT_VERSION] = SettingsSnapshot.PRIVACY_POLICY_VERSION
+        }
+    }
+
     companion object {
+        private val KEY_PRIVACY_CONSENT_VERSION = intPreferencesKey("privacy_consent_version")
         private val KEY_THEME_MODE = androidx.datastore.preferences.core.stringPreferencesKey("theme_mode")
         private val KEY_BASELINE_VERSION = longPreferencesKey("reminder_baseline_version")
         private val KEY_MAINTENANCE_STATE = androidx.datastore.preferences.core.stringPreferencesKey("maintenance_state")
@@ -256,6 +265,7 @@ class SettingsDataStore(private val context: Context, private val injectedStore:
     
     suspend fun setBackgroundMonitoringEnabled(enabled: Boolean) {
         store.edit { preferences ->
+            if (enabled) check(preferences[KEY_PRIVACY_CONSENT_VERSION] == SettingsSnapshot.PRIVACY_POLICY_VERSION && (preferences[KEY_MAINTENANCE_STATE] ?: "").isEmpty()) { "请先同意隐私说明" }
             preferences[KEY_BACKGROUND_MONITORING_ENABLED] = enabled
         }
     }

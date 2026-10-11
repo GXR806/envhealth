@@ -11,6 +11,10 @@ import kotlinx.coroutines.flow.asStateFlow
  */
 object MonitorState {
 
+    private val _error = MutableStateFlow<String?>(null)
+    val error: StateFlow<String?> = _error.asStateFlow()
+    fun reportError(message: String) { _error.value = message }
+    fun clearError() { _error.value = null }
     private val _isMonitoring = MutableStateFlow(false)
 
     /**

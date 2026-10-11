@@ -45,8 +45,10 @@ class NoiseAnalyzer {
         // 计算统计指标
         val leq1s = calculateLeq(frames1s)
         val leq1min = calculateLeq(frames1min)
-        val l10 = calculatePercentile(frames1min, 0.10)
-        val l90 = calculatePercentile(frames1min, 0.90)
+        // Both percentile ranks use the same ordered window; do not sort it twice.
+        val sorted = frames1min.map { it.dbA }.sorted()
+        val l10 = sorted[((1.0 - 0.10) * sorted.size).toInt().coerceIn(0, sorted.lastIndex)]
+        val l90 = sorted[((1.0 - 0.90) * sorted.size).toInt().coerceIn(0, sorted.lastIndex)]
 
         // 检测突发噪声
         val isBurst = detectBurst(frame)
@@ -101,24 +103,6 @@ class NoiseAnalyzer {
 
         val mean = sum / frames.size
         return (10.0 * log10(mean)).toFloat()
-    }
-
-    /**
-     * 计算百分位数 Ln
-     *
-     * L10: 有 10% 的时间超过该值（较吵的部分）
-     * L90: 有 90% 的时间超过该值（较安静的部分）
-     *
-     * @param frames 帧列表
-     * @param percentile 百分位（0.0 - 1.0）
-     * @return Ln (dB)
-     */
-    private fun calculatePercentile(frames: Collection<NoiseFrame>, percentile: Double): Float {
-        if (frames.isEmpty()) return 0f
-
-        val sorted = frames.map { it.dbA }.sorted()
-        val index = ((1.0 - percentile) * sorted.size).toInt().coerceIn(0, sorted.size - 1)
-        return sorted[index]
     }
 
     /**

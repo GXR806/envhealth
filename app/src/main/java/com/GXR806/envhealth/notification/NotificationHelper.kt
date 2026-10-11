@@ -78,6 +78,11 @@ object NotificationHelper {
                 NotificationManager.IMPORTANCE_HIGH
             ).apply {
                 description = "重要的环境健康提醒，包括噪音、光照、睡眠与耳机音量异常"
+                // 仅首次创建生效；旧渠道声音/重要性始终由系统与用户控制。
+                setSound(android.provider.Settings.System.DEFAULT_NOTIFICATION_URI,
+                    android.media.AudioAttributes.Builder()
+                        .setUsage(android.media.AudioAttributes.USAGE_NOTIFICATION)
+                        .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION).build())
                 setShowBadge(true)
                 enableVibration(true)
                 enableLights(true)
@@ -103,9 +108,15 @@ object NotificationHelper {
         val manager = context.getSystemService(NotificationManager::class.java)
         val channel = if (event.silent) ChannelId.HEALTH_SILENT else ChannelId.HEALTH_ALERT
         if (Build.VERSION.SDK_INT >= 33 && androidx.core.content.ContextCompat.checkSelfPermission(context,
-                android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) return false
-        if (!androidx.core.app.NotificationManagerCompat.from(context).areNotificationsEnabled()) return false
-        return manager.getNotificationChannel(channel)?.importance != NotificationManager.IMPORTANCE_NONE
+                android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            LogX.i("Reminder", "类型=${event.type.name} 原因=通知权限关闭"); return false
+        }
+        if (!androidx.core.app.NotificationManagerCompat.from(context).areNotificationsEnabled()) {
+            LogX.i("Reminder", "类型=${event.type.name} 原因=应用通知关闭"); return false
+        }
+        val enabled = manager.getNotificationChannel(channel)?.importance?.let { it != NotificationManager.IMPORTANCE_NONE } == true
+        if (!enabled) LogX.i("Reminder", "类型=${event.type.name} 原因=健康频道关闭（前台频道独立）")
+        return enabled
     }
 
     fun sendReminder(context: Context, event: com.GXR806.envhealth.domain.analysis.ReminderPolicy.Event): Boolean {
@@ -144,6 +155,47 @@ object NotificationHelper {
         }
         return try { manager.notify(3000 + event.type.ordinal, builder.build()); true }
         catch (e: SecurityException) { false }
+    }
+
+    /** 只诊断，低重要性/无声音不改变 canSendReminder 的资格契约。 */
+    fun healthChannelStatus(context: Context): String {
+        val manager = context.getSystemService(NotificationManager::class.java)
+        val channel = manager.getNotificationChannel(ChannelId.HEALTH_ALERT)
+        val permission = Build.VERSION.SDK_INT < 33 || androidx.core.content.ContextCompat.checkSelfPermission(
+            context, android.Manifest.permission.POST_NOTIFICATIONS) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        val appEnabled = androidx.core.app.NotificationManagerCompat.from(context).areNotificationsEnabled()
+        val silent = manager.getNotificationChannel(ChannelId.HEALTH_SILENT)
+        val active = try {
+            manager.activeNotifications.filter { it.id in 3000..3003 }.joinToString { "${it.id}/${it.notification.channelId}" }.ifEmpty { "无" }
+        } catch (_: Exception) { "读取失败" }
+        return "当前系统活动健康通知（非横幅证明）：$active\n" +
+            "静默健康渠道重要性：${silent?.importance ?: "未注册"}（0=关闭，无声是预期）\n" +
+            "通知权限：${if (permission) "已允许" else "未允许"}；应用通知：${if (appEnabled) "开启" else "关闭"}\n" +
+            "健康提醒渠道重要性：${channel?.importance ?: "未注册"}（HIGH=4）；声音：${if (channel?.sound != null) "已设置" else "无"}\n" +
+            "系统免打扰：${when (manager.currentInterruptionFilter) {
+                NotificationManager.INTERRUPTION_FILTER_ALL -> "未限制"
+                NotificationManager.INTERRUPTION_FILTER_UNKNOWN -> "未知"
+                else -> "限制中"
+            }}。悬浮横幅由系统/OEM与用户设置决定，HIGH且有声音也不保证弹出。"
+    }
+
+    fun openHealthChannelSettings(context: Context) {
+        val intent = Intent(android.provider.Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS).apply {
+            putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, context.packageName)
+            putExtra(android.provider.Settings.EXTRA_CHANNEL_ID, ChannelId.HEALTH_ALERT)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        try { context.startActivity(intent) }
+        catch (_: android.content.ActivityNotFoundException) {
+            try {
+                context.startActivity(Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                    putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, context.packageName)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                })
+            } catch (_: android.content.ActivityNotFoundException) {
+                android.widget.Toast.makeText(context, "无法打开通知设置，请在系统设置中查找本应用", android.widget.Toast.LENGTH_LONG).show()
+            }
+        }
     }
 
     fun cancelReminders(context: Context) {

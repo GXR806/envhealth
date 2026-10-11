@@ -29,7 +29,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 /**
@@ -49,6 +52,14 @@ class EnvMonitorService : LifecycleService() {
         private const val TAG = "EnvMonitorService"
         private var active: EnvMonitorService? = null
         private var finishing: Job? = null
+        fun requestReminderCheck(): Boolean {
+            val service = active ?: return false
+            if (!service.isMonitoring || service.isStopping || service.isDestroyed) return false
+            return service.reminderRequests.tryEmit(Unit)
+        }
+        fun requestStopForFailure() {
+            android.os.Handler(android.os.Looper.getMainLooper()).post { active?.stopMonitoring() }
+        }
         suspend fun stopAndAwait() = kotlinx.coroutines.withContext(Dispatchers.Main.immediate) {
             active?.stopMonitoring()
             finishing?.join()
@@ -69,7 +80,7 @@ class EnvMonitorService : LifecycleService() {
         fun startMonitoring(context: Context): Boolean {
             return try {
                 val container = (context.applicationContext as com.GXR806.envhealth.EnvHealthApplication).appContainer
-                if (container.maintenanceGate.blocked.value) return false
+                if (container.maintenanceGate.blocked.value || !container.consentReady.value) return false
                 val intent = Intent(context, EnvMonitorService::class.java).apply {
                     action = ACTION_START_MONITOR
                     putExtra("generation", container.maintenanceGate.generation.value)
@@ -107,17 +118,27 @@ class EnvMonitorService : LifecycleService() {
     }
 
     private val binder = LocalBinder()
-    private var isMonitoring = false
+    @Volatile private var isMonitoring = false
     private var isStarting = false
-    private var isStopping = false
-    private var isDestroyed = false
+    @Volatile private var isStopping = false
+    @Volatile private var isDestroyed = false
     private var cleanupJob: Job? = null
     private val headphoneGuard by lazy {
         (application as com.GXR806.envhealth.EnvHealthApplication).appContainer.headphoneGuard
     }
 
     // 协程作用域
-    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val exceptions = kotlinx.coroutines.CoroutineExceptionHandler { _, failure ->
+        if (failure is Error) {
+            Thread.getDefaultUncaughtExceptionHandler()?.uncaughtException(Thread.currentThread(), failure)
+            throw failure
+        }
+        MonitorState.reportError("监测任务异常，已请求停止；请手动重试。")
+        LogX.e(TAG, "监测任务异常")
+        // 系统主线程队列异步请求既有cleanup owner；handler不join、不阻塞。
+        android.os.Handler(android.os.Looper.getMainLooper()).post { stopMonitoring() }
+    }
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default + exceptions)
 
     // 噪音监测器
     private var noiseMonitor: NoiseMonitor? = null
@@ -128,6 +149,8 @@ class EnvMonitorService : LifecycleService() {
     // 数据流订阅任务
     private var dataFlowJob: Job? = null
     private var lightDataFlowJob: Job? = null
+    private var reminderJob: Job? = null
+    private val reminderRequests = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
 
     inner class LocalBinder : Binder() {
         fun getService(): EnvMonitorService = this@EnvMonitorService
@@ -152,7 +175,7 @@ class EnvMonitorService : LifecycleService() {
             var wasEnabled: Boolean? = null
             (application as com.GXR806.envhealth.EnvHealthApplication).appContainer.settingsRepository.snapshot.collect {
                 noiseMonitor?.updateCalibrationOffset(it.dbCalibrationOffset)
-                if ((wasEnabled == true && !it.backgroundMonitoringEnabled) || it.maintenanceState.isNotEmpty()) stopMonitoring()
+                if ((wasEnabled == true && !it.backgroundMonitoringEnabled) || !it.hasPrivacyConsent || it.maintenanceState.isNotEmpty()) stopMonitoring()
                 wasEnabled = it.backgroundMonitoringEnabled
             }
         }
@@ -167,7 +190,8 @@ class EnvMonitorService : LifecycleService() {
             val lightRepository = (application as com.GXR806.envhealth.EnvHealthApplication).appContainer.lightRepository
 
             // 创建光照监测器
-            lightMonitor = LightMonitor(applicationContext, this, lightRepository)
+            lightMonitor = LightMonitor(applicationContext, this, lightRepository,
+                (application as com.GXR806.envhealth.EnvHealthApplication).appContainer.lightBatch)
             LogX.i(TAG, "光照监测器已初始化")
         } catch (e: Exception) {
             LogX.e(TAG, "初始化光照监测器失败", e)
@@ -186,7 +210,8 @@ class EnvMonitorService : LifecycleService() {
             val calibrationOffset = SettingsDataStore.DEFAULT_DB_CALIBRATION_OFFSET
 
             // 创建噪音监测器
-            noiseMonitor = NoiseMonitor(noiseRepository, calibrationOffset)
+            noiseMonitor = NoiseMonitor(noiseRepository, calibrationOffset,
+                (application as com.GXR806.envhealth.EnvHealthApplication).appContainer.noiseBatch)
             LogX.i(TAG, "噪音监测器已初始化 (校准偏移: $calibrationOffset dB)")
         } catch (e: Exception) {
             LogX.e(TAG, "初始化噪音监测器失败", e)
@@ -266,12 +291,19 @@ class EnvMonitorService : LifecycleService() {
             // 前台通知先满足系统期限；读取授权后再开始硬件采集。
             serviceScope.launch(Dispatchers.Main.immediate) {
                 val container = (application as com.GXR806.envhealth.EnvHealthApplication).appContainer
-                val settings = container.settingsRepository.snapshot.first()
-                if (!settings.backgroundMonitoringEnabled || settings.maintenanceState.isNotEmpty() || container.maintenanceGate.blocked.value || isStopping || isDestroyed) {
-                    stopMonitoring()
-                    return@launch
-                }
-                beginCollection()
+                try {
+                    val settings = container.settingsRepository.snapshot.first()
+                    if (!settings.hasPrivacyConsent || !settings.backgroundMonitoringEnabled || settings.maintenanceState.isNotEmpty() || container.maintenanceGate.blocked.value || isStopping || isDestroyed) {
+                        stopMonitoring()
+                        return@launch
+                    }
+                    // 只在明确手动启动时重试旧有界批次，失败不开硬件。
+                    container.noiseBatch.flush()
+                    container.lightBatch.flush()
+                    if (isStopping || isDestroyed || container.maintenanceGate.blocked.value) return@launch
+                    beginCollection()
+                } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+                catch (e: Exception) { LogX.e(TAG, "授权读取失败", e); stopMonitoring() }
             }
         } catch (e: Exception) {
             LogX.e(TAG, "启动监测失败", e)
@@ -281,6 +313,7 @@ class EnvMonitorService : LifecycleService() {
 
     private fun beginCollection() {
         try {
+            MonitorState.clearError()
             isStarting = false
             isMonitoring = true
             MonitorState.setMonitoring(true)
@@ -317,11 +350,46 @@ class EnvMonitorService : LifecycleService() {
             }
 
             headphoneGuard.start()
+            startRealtimeReminders()
 
             LogX.i(TAG, "监测服务已启动")
         } catch (e: Exception) {
             LogX.e(TAG, "启动监测失败", e)
             stopSelf()
+        }
+    }
+
+    /** Noise is read only on a 30s tick; headphone changes and settings trigger immediately.
+     * Ignore reading timestamps so OEM 5s volume polls do not cause redundant lock/IO.
+     * Duration/weekly use HeadphoneGuard's existing running aggregates (no extra history query).
+     */
+    @OptIn(kotlinx.coroutines.FlowPreview::class)
+    private fun startRealtimeReminders() {
+        val container = (application as com.GXR806.envhealth.EnvHealthApplication).appContainer
+        val generation = container.maintenanceGate.generation.value
+        reminderJob = serviceScope.launch(Dispatchers.IO) {
+            val coordinator = com.GXR806.envhealth.worker.ReminderCoordinator(container.reminderRuntime)
+            val tick = flow {
+                while (currentCoroutineContext().isActive) {
+                    emit(Unit)
+                    delay(30_000)
+                }
+            }
+            val noise = NoiseMonitorState.analysisResult.sample(30_000)
+                .onStart { emit(NoiseMonitorState.analysisResult.value) }
+            val triggers = combine(merge(tick, reminderRequests), noise, headphoneGuard.state.map {
+                Triple(it.running, it.reading?.percent, Pair(it.reading?.device, it.reading?.playing))
+            }.distinctUntilChanged(), container.settingsRepository.snapshot) { _, _, _, _ -> Unit }
+            com.GXR806.envhealth.worker.RealtimeReminderListener().run(triggers, check = {
+                coordinator.run(remindOnly = true) {
+                    isMonitoring && !isStopping && !isDestroyed &&
+                        generation == container.maintenanceGate.generation.value &&
+                        !container.maintenanceGate.blocked.value
+                }
+            }, failure = {
+                container.reminderRuntime.diagnostic(null, "实时提醒检查失败，保留节流；监听继续重试")
+                LogX.e(TAG, "实时提醒检查失败，监听继续重试")
+            })
         }
     }
 
@@ -331,14 +399,16 @@ class EnvMonitorService : LifecycleService() {
     private fun stopMonitoring() {
         if (isStopping || cleanupJob != null) return
         isStopping = true
+        reminderJob?.cancel() // invalidate before any cleanup suspension / gate wait
         isStarting = false
         // 明确拥有的短生命周期作用域，不作为 serviceScope 的子任务。
         // onDestroy 取消采集任务不会取消最终落库，完成后自动释放该作用域。
-        val cleanupScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+        val cleanupScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate + exceptions)
         cleanupJob = cleanupScope.launch {
             try {
-                val uiJobs = listOfNotNull(dataFlowJob, lightDataFlowJob)
+                val uiJobs = listOfNotNull(dataFlowJob, lightDataFlowJob, reminderJob)
                 uiJobs.forEach { it.cancel() }
+                reminderJob = null
                 dataFlowJob = null
                 lightDataFlowJob = null
                 val headphoneDone = try {

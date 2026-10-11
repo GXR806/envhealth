@@ -5,7 +5,7 @@ import androidx.test.core.app.ApplicationProvider
 import com.GXR806.envhealth.data.local.room.EnvHealthDatabase
 import com.GXR806.envhealth.data.local.room.entity.LightSampleEntity
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Before
 import org.junit.Test
@@ -36,7 +36,7 @@ class LightSampleDaoTest {
     }
     
     @Test
-    fun insertSample_andRetrieve_success() = runTest {
+    fun insertSample_andRetrieve_success() = runBlocking {
         // Given
         val sample = LightSampleEntity(
             timestamp = 1000L,
@@ -55,7 +55,7 @@ class LightSampleDaoTest {
     }
     
     @Test
-    fun insertMultipleSamples_andQueryByTimeRange_success() = runTest {
+    fun insertMultipleSamples_andQueryByTimeRange_success() = runBlocking {
         // Given
         val samples = listOf(
             LightSampleEntity(timestamp = 1000L, avgLuma = 50f, estimatedLux = 100f, level = "DIM"),
@@ -74,7 +74,7 @@ class LightSampleDaoTest {
     }
     
     @Test
-    fun getAverageLuma_returnsCorrectValue() = runTest {
+    fun getAverageLuma_returnsCorrectValue() = runBlocking {
         // Given
         val samples = listOf(
             LightSampleEntity(timestamp = 1000L, avgLuma = 100f, estimatedLux = 200f, level = "DIM"),
@@ -91,7 +91,7 @@ class LightSampleDaoTest {
     }
     
     @Test
-    fun getAverageLux_returnsCorrectValue() = runTest {
+    fun getAverageLux_returnsCorrectValue() = runBlocking {
         // Given
         val samples = listOf(
             LightSampleEntity(timestamp = 1000L, avgLuma = 100f, estimatedLux = 200f, level = "DIM"),
@@ -108,7 +108,7 @@ class LightSampleDaoTest {
     }
     
     @Test
-    fun deleteBeforeTime_removesOldData() = runTest {
+    fun deleteBeforeTime_removesOldData() = runBlocking {
         // Given
         val samples = listOf(
             LightSampleEntity(timestamp = 1000L, avgLuma = 100f, estimatedLux = 200f, level = "DIM"),
