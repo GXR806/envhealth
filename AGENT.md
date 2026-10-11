@@ -1,5 +1,13 @@
 # AGENT 当前维护交接
 
+## 最新用户反馈与仅 launcher 图标授权
+
+用户反馈通知问题验证成功、连接设备检测已完成，仅记录此范围；未将19项Reminder仪器/全部设备生命周期/Release安装/Profiler勾为通过。下文无设备为历史轮次结果，不代表当前连接状态。
+
+仅替换应用launcher：原稿artwork/app_icon.png（1245×1250）完整保留，不覆盖/重绘；Gradle原生Copy generateLauncherArtwork生成build/generated/launcherArtwork/res/drawable-nodpi/ic_app_artwork.png，AGP Variant Sources API注册所有variant资源并携带任务依赖，preBuild亦依赖，缺少原稿中文fail。build生成物不入仓库，原稿应随项目保留；未新增依赖/转换脚本。前景108层中央约66、横向按原稿比例微调留白，外围蓝紫gradient，普通/round自适应入口一致；移除机器人及monochrome引用，不宣称新增单色主题图标。旧密度webp非当前adaptive入口。Manifest icon/roundIcon不改，通知small icon/Service/策略/权限/SDK/schema/评分不改。
+
+本次最终串行assembleDebug、assembleRelease成功；初次Provider SourceSet和configuration-cache错误已修正为Variant Sources及局部File捕获。不执行JVM/connected/Profiler/截图，不把构建当设备裁切或签名安装验证。更新同签名APK后看桌面/抽屉；缓存旧图可移除快捷方式再添加或重启桌面/设备，不清应用/桌面数据、不卸载。launcher形状外观仍待验收。
+
 ## 应用外无消息最新诊断
 
 已核Main/Home/Service/Guard/AppContainer/Coordinator/Store/Policy，无Home退后台取消/依赖UI订阅证据。确证代码缺陷：实时提醒一次普通异常永久结束而传感器仍运行；新增Service-owned RealtimeReminderListener，检查失败退避5s后保留下次事件/tick检查、上游失败重订阅；不重启硬件、不绕过claim，取消/Error不重试。移除takeWhile早结束，授权/后台/维护仍由Service停止及Coordinator发前重读/generation保护。未复现设备，不能断言实际根因。
@@ -84,4 +92,4 @@ release minify/resource shrink开启，app-release-unsigned.apk，1.0.0/code1；
 
 adb devices空：connected/部署/截图/Profiler/签名安装阻塞。按TODO/交付总结操作预期验收隐私拒绝/失败/重启、后台默认false与所有入口gate、授权退场、真实采集/尾flush/DB失败有界暂停/资源、P6 OEM/暂停/路由、通知动作、7/90d清理、clear并发/失败/kill/缓存、theme/200%字体/TalkBack/对比度、release Room/Worker反射回归。
 
-系统kill/OOM未保证最后写入，OEM播放约5s目标而非硬实时、媒体路由估算，缺曝光/低性能/过夜资源性能待Profiler。可选遗留P8/导出/专用图标/whole覆盖提升须另授权，不把它们标已实现或自动进入新阶段。CHANGELOG/DEBUG及docs/security-alignment是历史专项说明，当前验证数字以本文/README/docs/testing为准，不从旧阶段数字推出最终状态。
+系统kill/OOM未保证最后写入，OEM播放约5s目标而非硬实时、媒体路由估算，缺曝光/低性能/过夜资源性能待Profiler。可选遗留P8/导出/专用通知图标/whole覆盖提升须另授权，不把它们标已实现或自动进入新阶段。CHANGELOG/DEBUG及docs/security-alignment是历史专项说明，当前验证数字以本文/README/docs/testing为准，不从旧阶段数字推出最终状态。

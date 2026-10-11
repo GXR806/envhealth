@@ -13,7 +13,18 @@ Android 本地环境健康应用。**代码交付完成，实体机及发布验�
 - 设置阈值、原子静默时间、噪音校准、后台授权、三种主题、可重入清除；本地提醒/反馈节流与 7/90 天保留。
 - 有界批量特征写入与用户可停止的前台服务，维护先 stop/join，再清库/失效缓存，不自动重启。
 
-## 本次应用外无消息诊断与修复（最新）
+## 最新状态与 launcher 图标（本次仅图标授权）
+
+用户已反馈通知问题验证成功、连接设备检测已完成；这是用户提供的验证范围，不代表全部生命周期、19项Reminder仪器、Release安装或Profiler均已通过。后文“无设备”是对应历史轮次的工具结果，不应当作当前连接状态。
+
+- 原稿 `artwork/app_icon.png` 原样保留（1245×1250），不覆盖、不重绘。Gradle 原生 Copy 任务 `generateLauncherArtwork` 复制到 `app/build/generated/launcherArtwork/res/drawable-nodpi/ic_app_artwork.png`；该文件是可重建产物，不提交 build 目录。缺少原稿会中文报错，输入变更由Gradle追踪。
+- AGP Variant Sources API 注册各variant生成资源并携带依赖，`preBuild`也依赖复制任务；无需额外依赖、图像转换工具或配置期图片解析。
+- 普通/圆形自适应图标均用完整原稿：108dp层中心约66dp留白布局，横向微调保持1245:1250比例，蓝紫渐变填充外围。移除旧机器人foreground及其monochrome引用，不把彩色原稿当单色主题图标；不同launcher遮罩/动画仍需设备外观验收。minSdk26使用anydpi adaptive XML；旧密度webp保留但不作为当前adaptive入口。
+- Manifest既有icon/roundIcon引用不变；**未修改通知small icon、通知策略、Service、权限、评分、SDK或schema**。
+- 本次串行 `:app:assembleDebug`、`:app:assembleRelease` 成功；本次未执行JVM/connected/Profiler/截图，release构建不是签名安装验证。
+- 设备更新同签名debug APK后回桌面及应用抽屉查看；若仍缓存旧图标，先移除桌面快捷方式再重新添加，必要时重启桌面/设备。**不要清应用数据或卸载来刷新图标**；不要清除桌面数据导致布局丢失。
+
+## 本次应用外无消息诊断与修复（历史轮次）
 
 已读 Main/Home/Service/Guard/Runtime/Coordinator/Store/Policy：未发现按Home或退出页面会停止已运行提醒；Service/Guard自有owner且直接订阅实时Flow，不依赖UI subscriber。可确证缺陷是实时提醒的一次普通异常会永久结束监听，传感器/Banner仍可运行；改为Service-owned listener，单次检查失败保留claim并在后续事件/tick重查（失败退避5s），上游失败退避重订阅；移除takeWhile终止，授权/维护/stop仍由Service与Coordinator最终gate封闭。未复现用户设备，不能断言异常就是该机根因。5s播放轮询未改，模拟5s更新不是后台硬实时证明。
 

@@ -4,6 +4,43 @@ plugins {
     alias(libs.plugins.ksp)
 }
 
+// 原稿保留在仓库 artwork；只在构建目录生成资源，不解码、缩放或改写原图。
+val launcherArtwork = rootProject.layout.projectDirectory.file("artwork/app_icon.png")
+val validateLauncherArtwork = tasks.register("validateLauncherArtwork") {
+    val artworkFile = launcherArtwork.asFile
+    inputs.file(artworkFile).optional()
+    doLast {
+        check(artworkFile.isFile) {
+            "应用图标原稿缺失：请保留项目根目录 artwork/app_icon.png 后重新构建。"
+        }
+    }
+}
+abstract class LauncherArtworkCopy : Copy() {
+    @get:org.gradle.api.tasks.OutputDirectory
+    abstract val resourceDirectory: org.gradle.api.file.DirectoryProperty
+}
+
+val generateLauncherArtwork = tasks.register<LauncherArtworkCopy>("generateLauncherArtwork") {
+    dependsOn(validateLauncherArtwork)
+    from(launcherArtwork) {
+        into("drawable-nodpi")
+        rename { "ic_app_artwork.png" }
+    }
+    resourceDirectory.set(layout.buildDirectory.dir("generated/launcherArtwork/res"))
+    into(resourceDirectory)
+}
+
+tasks.named("preBuild") {
+    dependsOn(generateLauncherArtwork)
+}
+
+// AGP 9 的 Variant Sources API 将生成目录用于所有 variant，并携带任务依赖。
+androidComponents.onVariants { variant ->
+    variant.sources.res?.addGeneratedSourceDirectory(generateLauncherArtwork) {
+        it.resourceDirectory
+    }
+}
+
 android {
     namespace = "com.GXR806.envhealth"
     compileSdk = 34
