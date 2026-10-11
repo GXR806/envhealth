@@ -77,16 +77,17 @@ class AWeightingFilter(sampleRate: Int = 44100) {
      * @param samples 输入样本数组
      * @return A 计权后的 RMS 值
      */
-    fun processAndCalculateRMS(samples: ShortArray): Double {
-        if (samples.isEmpty()) return 0.0
+    fun processAndCalculateRMS(samples: ShortArray, count: Int = samples.size): Double {
+        require(count in 0..samples.size) { "有效音频样本数超出缓冲区" }
+        if (count == 0) return 0.0
 
         var sumSquares = 0.0
-        for (sample in samples) {
-            val filtered = process(sample.toDouble())
+        for (i in 0 until count) {
+            val filtered = process(samples[i].toDouble())
             sumSquares += filtered * filtered
         }
 
-        return sqrt(sumSquares / samples.size)
+        return sqrt(sumSquares / count)
     }
 
     /**

@@ -17,6 +17,7 @@ import com.GXR806.envhealth.domain.model.LightLevel
 import com.GXR806.envhealth.util.Constants
 import com.GXR806.envhealth.util.LogX
 import com.GXR806.envhealth.util.TimeUtils
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.BufferOverflow
@@ -81,6 +82,25 @@ class LightSensorCamera(
     private var imageAnalysis: ImageAnalysis? = null
     private var isRunning = false
     private var samplingJob: Job? = null
+    // Accessed only by the single analysis executor. First callback is sampled immediately.
+    private var lastAnalyzedElapsedMs: Long? = null
+    @Volatile private var stopped = false
+    private var analysisExecutor: java.util.concurrent.ExecutorService? = null
+    private var stoppedExecutor: java.util.concurrent.ExecutorService? = null
+    private var stoppedSamplingJob: Job? = null
+    suspend fun awaitStopped() {
+        stoppedSamplingJob?.join()
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            val executor = stoppedExecutor
+            if (executor != null) {
+                while (!executor.awaitTermination(1, java.util.concurrent.TimeUnit.SECONDS)) {
+                    kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                }
+            }
+        }
+        stoppedExecutor = null
+        stoppedSamplingJob = null
+    }
     
     // 原子变量存储最新的曝光参数（通过 CaptureCallback 更新）
     private val latestExposureTimeNs = AtomicLong(0L)
@@ -98,9 +118,11 @@ class LightSensorCamera(
             return false
         }
         
+        stopped = false
         try {
             val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
             cameraProviderFuture.addListener({
+                if (stopped) return@addListener
                 try {
                     cameraProvider = cameraProviderFuture.get()
                     setupCamera(scope)
@@ -122,26 +144,27 @@ class LightSensorCamera(
      * 停止光照监测
      */
     fun stop() {
-        if (!isRunning) {
-            return
-        }
-        
+        check(android.os.Looper.myLooper() == android.os.Looper.getMainLooper())
+        // 即使 Provider 尚未返回也禁止延迟回调再次绑定相机。
+        stopped = true
+        isRunning = false
+        if (samplingJob != null) stoppedSamplingJob = samplingJob
+        samplingJob?.cancel()
+        samplingJob = null
         try {
-            samplingJob?.cancel()
-            samplingJob = null
-            
-            cameraProvider?.unbindAll()
-            cameraProvider = null
-            imageAnalysis = null
-            
-            // 重置曝光参数
-            latestExposureTimeNs.set(0L)
-            latestIso.set(null)
-            
-            isRunning = false
-            LogX.i(TAG, "光照监测已停止")
-        } catch (e: Exception) {
-            LogX.e(TAG, "停止光照监测失败", e)
+            imageAnalysis?.clearAnalyzer()
+        } finally {
+            try {
+                cameraProvider?.unbindAll() // CameraX @MainThread
+            } finally {
+                if (analysisExecutor != null) stoppedExecutor = analysisExecutor
+                analysisExecutor?.shutdown()
+                analysisExecutor = null
+                cameraProvider = null
+                imageAnalysis = null
+                latestExposureTimeNs.set(0L)
+                latestIso.set(null)
+            }
         }
     }
     
@@ -190,8 +213,11 @@ class LightSensorCamera(
                 }
             })
             
+            lastAnalyzedElapsedMs = null
+            val executor = Executors.newSingleThreadExecutor()
+            analysisExecutor = executor
             imageAnalysis = analysisBuilder.build().apply {
-                setAnalyzer(Executors.newSingleThreadExecutor()) { imageProxy ->
+                setAnalyzer(executor) { imageProxy ->
                     analyzeImage(imageProxy)
                 }
             }
@@ -207,7 +233,7 @@ class LightSensorCamera(
             // 启动定时采样（1 秒 1 帧）
             startSampling(scope)
             
-            LogX.i(TAG, "摄像头已绑定 - 分辨率: ${TARGET_WIDTH}x${TARGET_HEIGHT}，使用后置摄像头")
+            LogX.i(TAG, "摄像头已绑定 - 分辨率: ${TARGET_WIDTH}x${TARGET_HEIGHT}，使用前置摄像头")
         } catch (e: Exception) {
             LogX.e(TAG, "设置摄像头失败", e)
         }
@@ -230,6 +256,12 @@ class LightSensorCamera(
      */
     private fun analyzeImage(imageProxy: ImageProxy) {
         try {
+            if (stopped) return
+            // Reject before touching/scanning the Y plane. finally closes rejected frames too.
+            val elapsedMs = android.os.SystemClock.elapsedRealtime()
+            val previous = lastAnalyzedElapsedMs
+            if (previous != null && elapsedMs - previous < SAMPLE_INTERVAL_MS) return
+            lastAnalyzedElapsedMs = elapsedMs
             // 获取 YUV Y 平面
             val yPlane = imageProxy.planes[0]
             val yBuffer = yPlane.buffer

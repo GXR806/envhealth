@@ -52,6 +52,15 @@ interface SleepReportDao {
     """)
     fun getRecentReports(limit: Int): Flow<List<SleepReportEntity>>
     
+    /** 只读联合查询，时间以会话开始毫秒为准，半开区间。 */
+    @Query("""
+        SELECT sr.*, ss.startTime AS sessionStartTime FROM sleep_reports sr
+        INNER JOIN sleep_sessions ss ON sr.sessionId = ss.id
+        WHERE ss.startTime >= :start AND ss.startTime < :end
+        ORDER BY ss.startTime DESC, sr.id DESC
+    """)
+    fun getHistory(start: Long, end: Long): Flow<List<com.GXR806.envhealth.data.repository.HistoryReportRow>>
+
     /**
      * 查询平均总分
      */

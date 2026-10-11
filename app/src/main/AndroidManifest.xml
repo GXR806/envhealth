@@ -5,7 +5,7 @@
         android:name="android.hardware.camera"
         android:required="false" />
 
-    <!-- 后续功能所需权限：当前阶段仅声明，不申请、不执行采集。 -->
+    <!-- 本地手动环境监测、提醒动作和仅任务恢复；不声明网络权限。 -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
@@ -36,6 +36,11 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <receiver android:name=".notification.HealthActionReceiver" android:exported="false" />
+        <receiver android:name=".worker.BootReceiver" android:exported="false">
+            <intent-filter><action android:name="android.intent.action.BOOT_COMPLETED" /></intent-filter>
+        </receiver>
 
         <!-- 环境监测前台服务 -->
         <service

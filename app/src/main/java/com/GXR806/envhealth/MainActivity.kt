@@ -4,6 +4,19 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.SystemBarStyle
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.LaunchedEffect
+import com.GXR806.envhealth.data.local.datastore.SettingsSnapshot
+import com.GXR806.envhealth.ui.viewmodel.SettingsViewModel
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material3.Icon
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -38,16 +51,44 @@ class MainActivity : ComponentActivity() {
         com.GXR806.envhealth.notification.NotificationHelper.createNotificationChannels(this)
         
         setContent {
-            环境健康Theme {
-                EnvHealthApp()
+            val app = applicationContext as EnvHealthApplication
+            val settingsViewModel: SettingsViewModel =
+                androidx.lifecycle.viewmodel.compose.viewModel(factory = object : androidx.lifecycle.ViewModelProvider.Factory {
+                    override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T {
+                        @Suppress("UNCHECKED_CAST")
+                        return SettingsViewModel(app.appContainer) as T
+                    }
+                })
+            val loadedSettings by settingsViewModel.loadedSettings.collectAsState()
+            val busy by settingsViewModel.busy.collectAsState()
+            val message by settingsViewModel.message.collectAsState()
+            val settings = loadedSettings ?: SettingsSnapshot()
+            val systemDark = isSystemInDarkTheme()
+            val darkTheme = when (settings.themeMode) {
+                SettingsSnapshot.THEME_MODE_LIGHT -> false
+                SettingsSnapshot.THEME_MODE_DARK -> true
+                else -> systemDark
+            }
+            LaunchedEffect(darkTheme) {
+                enableEdgeToEdge(
+                    statusBarStyle = SystemBarStyle.auto(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT) { darkTheme },
+                    navigationBarStyle = SystemBarStyle.auto(0xE6FFFFFF.toInt(), 0x801B1B1B.toInt()) { darkTheme }
+                )
+            }
+            环境健康Theme(darkTheme = darkTheme) {
+                com.GXR806.envhealth.ui.component.PrivacyConsentContent(loadedSettings,
+                    settingsViewModel::acceptPrivacy, { finishAndRemoveTask() }, busy, message) {
+                    EnvHealthApp(settingsViewModel)
+                }
             }
         }
     }
 }
 
 @Composable
-private fun EnvHealthApp() {
+private fun EnvHealthApp(settingsViewModel: SettingsViewModel) {
     var selectedTab by rememberSaveable { mutableIntStateOf(0) }
+    var showSettings by rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
 
     Scaffold(
         bottomBar = {
@@ -55,49 +96,82 @@ private fun EnvHealthApp() {
                 tabTitles.forEachIndexed { index, title ->
                     NavigationBarItem(
                         selected = selectedTab == index,
-                        onClick = { selectedTab = index },
-                        icon = {},
+                        onClick = { selectedTab = index; showSettings = false },
+                        icon = { Icon(when (index) {
+                            0 -> Icons.Default.Home
+                            1 -> Icons.Default.Info
+                            2 -> Icons.Default.Star
+                            else -> Icons.AutoMirrored.Filled.List
+                        }, contentDescription = title) },
                         label = { Text(title) },
                     )
                 }
             }
         },
     ) { innerPadding ->
-        TabContent(
-            title = tabTitles[selectedTab],
-            modifier = Modifier.padding(innerPadding),
-        )
+        AnimatedContent(targetState = if (showSettings) -1 else selectedTab, label = "页面切换") { page ->
+            if (page == -1) {
+                com.GXR806.envhealth.ui.screen.SettingsScreen(settingsViewModel, { showSettings = false }, Modifier.padding(innerPadding))
+            } else TabContent(
+                title = tabTitles[page],
+                modifier = Modifier.padding(innerPadding),
+                onGoHome = { selectedTab = 0 },
+                onSettings = { showSettings = true },
+                onOpenReport = { selectedTab = 3 },
+                active = page == selectedTab && !showSettings,
+            )
+        }
     }
 }
 
 @Composable
-private fun TabContent(title: String, modifier: Modifier = Modifier) {
+private fun TabContent(title: String, modifier: Modifier = Modifier, onGoHome: () -> Unit, onSettings: () -> Unit, onOpenReport: () -> Unit, active: Boolean) {
     val context = LocalContext.current
     val app = context.applicationContext as EnvHealthApplication
     
     when (title) {
         "首页" -> {
             // 首页使用真实的 HomeScreen
-            com.GXR806.envhealth.ui.screen.HomeScreen(modifier = modifier)
+            com.GXR806.envhealth.ui.screen.HomeScreen(modifier = modifier, onSettings = onSettings, active = active, onOpenReport = onOpenReport)
         }
         "环境监测" -> {
             // 环境监测页使用真实的 MonitorScreen
             com.GXR806.envhealth.ui.screen.MonitorScreen(modifier = modifier)
         }
+        "耳机守护" -> {
+            val guardViewModel: com.GXR806.envhealth.ui.viewmodel.HeadphoneGuardViewModel =
+                androidx.lifecycle.viewmodel.compose.viewModel(factory = object : androidx.lifecycle.ViewModelProvider.Factory {
+                    override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T {
+                        @Suppress("UNCHECKED_CAST")
+                        return com.GXR806.envhealth.ui.viewmodel.HeadphoneGuardViewModel(app.appContainer.headphoneGuard) as T
+                    }
+                })
+            com.GXR806.envhealth.ui.screen.HeadphoneGuardScreen(guardViewModel, onGoHome, modifier)
+        }
         "报告" -> {
             // 报告页使用真实的 ReportScreen
             val context = LocalContext.current
-            val viewModel = remember {
-                ReportViewModel(
-                    context = context,
-                    sleepSessionManager = app.appContainer.sleepSessionManager,
-                    generateSleepReportUseCase = app.appContainer.generateSleepReportUseCase,
-                    generateHealthAdviceUseCase = app.appContainer.generateHealthAdviceUseCase,
-                    sleepRepository = app.appContainer.sleepRepository,
-                    adviceRepository = app.appContainer.adviceRepository
-                )
-            }
-            ReportScreen(viewModel = viewModel, modifier = modifier)
+            val viewModel: ReportViewModel = androidx.lifecycle.viewmodel.compose.viewModel(factory = object : androidx.lifecycle.ViewModelProvider.Factory {
+                override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T {
+                    @Suppress("UNCHECKED_CAST")
+                    return ReportViewModel(
+                        context = context.applicationContext,
+                        sleepSessionManager = app.appContainer.sleepSessionManager,
+                        generateSleepReportUseCase = app.appContainer.generateSleepReportUseCase,
+                        generateHealthAdviceUseCase = app.appContainer.generateHealthAdviceUseCase,
+                        sleepRepository = app.appContainer.sleepRepository,
+                        adviceRepository = app.appContainer.adviceRepository
+                    ) as T
+                }
+            })
+            val history: com.GXR806.envhealth.ui.viewmodel.HistoryViewModel =
+                androidx.lifecycle.viewmodel.compose.viewModel(factory = object : androidx.lifecycle.ViewModelProvider.Factory {
+                    override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T {
+                        @Suppress("UNCHECKED_CAST")
+                        return com.GXR806.envhealth.ui.viewmodel.HistoryViewModel(app.appContainer) as T
+                    }
+                })
+            ReportScreen(viewModel = viewModel, historyViewModel = history, modifier = modifier)
         }
         else -> {
             // 其他页面仍为占位

@@ -38,6 +38,14 @@ interface HeadphoneUsageDao {
     @Query("SELECT * FROM headphone_usage WHERE endTime IS NULL ORDER BY startTime DESC")
     fun getOngoingUsages(): Flow<List<HeadphoneUsageEntity>>
     
+    /** 查询全部已完成的播放区间，交由领域层按时间边界裁剪。 */
+    @Query("SELECT * FROM headphone_usage WHERE endTime IS NOT NULL ORDER BY startTime DESC")
+    suspend fun getCompletedIntervals(): List<HeadphoneUsageEntity>
+
+    /** 历史图表读取所有与半开范围重叠的已完成区间，包含跨午夜记录。 */
+    @Query("SELECT * FROM headphone_usage WHERE endTime IS NOT NULL AND startTime < :end AND endTime > :start ORDER BY startTime ASC")
+    fun getOverlapping(start: Long, end: Long): Flow<List<HeadphoneUsageEntity>>
+
     /**
      * 按时间范围查询记录
      */
@@ -82,6 +90,10 @@ interface HeadphoneUsageDao {
     /**
      * 删除全部数据
      */
+    /** 按完成时间保守清理，不删进行中的区间。 */
+    @Query("DELETE FROM headphone_usage WHERE endTime IS NOT NULL AND endTime < :beforeTime")
+    suspend fun deleteCompletedBeforeEnd(beforeTime: Long): Int
+
     @Query("DELETE FROM headphone_usage")
     suspend fun deleteAll(): Int
 }

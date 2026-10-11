@@ -25,7 +25,8 @@ import kotlinx.coroutines.launch
 class LightMonitor(
     private val context: Context,
     private val lifecycleOwner: LifecycleOwner,
-    private val repository: LightRepository
+    private val repository: LightRepository,
+    private val batch: com.GXR806.envhealth.data.sensor.BoundedSampleBatch<LightSample>
 ) {
     companion object {
         private const val TAG = "LightMonitor"
@@ -34,8 +35,30 @@ class LightMonitor(
         private const val SAVE_INTERVAL_MS = 30 * 1000L
     }
     
+    private var lastQueuedTimestamp: Long? = null
+    private fun writeError() {
+        com.GXR806.envhealth.util.MonitorState.reportError("光照保存失败，已暂停采集；最多3条特征留在内存，请停止重试。进程终止可能丢失。")
+        LogX.e(TAG, "光照批次写入失败，暂停采集")
+    }
     private var camera: LightSensorCamera? = null
     private var saveJob: Job? = null
+    private var frameJob: Job? = null
+    private var stoppedJobs = emptyList<Job>()
+    private var stoppedCamera: LightSensorCamera? = null
+    suspend fun awaitStopped() {
+        try {
+            stoppedJobs.forEach { it.join() }
+            stoppedCamera?.awaitStopped()
+            if (!batch.failed) saveLatestFrame()
+            batch.flush()
+        } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+        catch (e: Exception) { writeError() }
+        finally {
+            stoppedCamera = null
+            stoppedJobs = emptyList()
+            latestFrame = null
+        }
+    }
     private var isRunning = false
     
     /** 最新的光照帧（用于保存） */
@@ -65,17 +88,30 @@ class LightMonitor(
             }
             
             // 订阅光照数据流
-            scope.launch {
+            frameJob = scope.launch(kotlinx.coroutines.Dispatchers.Main.immediate) {
                 camera?.lightFrameFlow?.collect { frame ->
                     latestFrame = frame
                 }
             }
             
             // 启动定时保存任务
-            saveJob = scope.launch {
+            isRunning = true
+            saveJob = scope.launch(kotlinx.coroutines.Dispatchers.Main.immediate) {
                 while (isRunning) {
                     delay(SAVE_INTERVAL_MS)
-                    saveLatestFrame()
+                    try {
+                        saveLatestFrame()
+                        batch.flushIfDue()
+                    } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+                    catch (e: Exception) {
+                        writeError()
+                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main.immediate) {
+                            camera?.stop()
+                            frameJob?.cancel()
+                            isRunning = false
+                        }
+                        break
+                    }
                 }
             }
             
@@ -94,24 +130,19 @@ class LightMonitor(
      * 停止光照监测
      */
     fun stop() {
-        if (!isRunning) {
-            return
-        }
-        
+        check(android.os.Looper.myLooper() == android.os.Looper.getMainLooper())
         try {
-            saveJob?.cancel()
-            saveJob = null
-            
+            stoppedJobs = listOfNotNull(saveJob, frameJob)
+            stoppedJobs.forEach { it.cancel() }
+            frameJob = null
             camera?.stop()
+        } finally {
+            saveJob = null
+            stoppedCamera = camera
             camera = null
-            
-            latestFrame = null
-            
             isRunning = false
-            LogX.i(TAG, "光照监测已停止")
-        } catch (e: Exception) {
-            LogX.e(TAG, "停止光照监测失败", e)
         }
+        LogX.i(TAG, "光照监测已停止")
     }
     
     /**
@@ -119,23 +150,12 @@ class LightMonitor(
      */
     private suspend fun saveLatestFrame() {
         val frame = latestFrame ?: return
-        
-        try {
-            // 转换为领域模型
-            val sample = LightSample(
-                timestamp = frame.timestamp,
-                avgLuma = frame.avgLuma,
-                estimatedLux = frame.estimatedLux,
-                level = frame.level
-            )
-            
-            // 保存到数据库
-            repository.insertSample(sample)
-            
-            LogX.d(TAG, "已保存光照采样 - 亮度: ${frame.relativeBrightness.toInt()}%, 等级: ${frame.level}")
-            
-        } catch (e: Exception) {
-            LogX.e(TAG, "保存光照采样失败", e)
+        if (frame.timestamp == lastQueuedTimestamp) return
+        val sample = LightSample(timestamp = frame.timestamp, avgLuma = frame.avgLuma,
+            estimatedLux = frame.estimatedLux, level = frame.level)
+        kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+            lastQueuedTimestamp = frame.timestamp
+            batch.offer(sample)
         }
     }
     

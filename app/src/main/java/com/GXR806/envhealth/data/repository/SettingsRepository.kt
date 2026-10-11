@@ -8,9 +8,17 @@ import kotlinx.coroutines.flow.Flow
  * 应用设置数据仓库
  * 负责用户配置的持久化与查询
  */
-class SettingsRepository(context: Context) {
+class SettingsRepository(context: Context, store: androidx.datastore.core.DataStore<androidx.datastore.preferences.core.Preferences>? = null) {
     
-    private val settingsDataStore = SettingsDataStore(context)
+    private val settingsDataStore = SettingsDataStore(context.applicationContext, store)
+    val reminderStore = ReminderStore(settingsDataStore.store)
+    val snapshot = settingsDataStore.snapshot
+    suspend fun acceptPrivacyPolicy() = settingsDataStore.acceptPrivacyPolicy()
+    suspend fun setThemeMode(mode: String) = settingsDataStore.setThemeMode(mode)
+    suspend fun setQuietTimes(startHour: Int, startMinute: Int, endHour: Int, endMinute: Int) =
+        settingsDataStore.setQuietTimes(startHour, startMinute, endHour, endMinute)
+    suspend fun setMaintenanceState(state: String) = settingsDataStore.setMaintenanceState(state)
+    suspend fun resetAll() = settingsDataStore.resetAll()
     
     // ========== 噪音监测设置 ==========
     

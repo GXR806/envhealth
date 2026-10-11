@@ -26,6 +26,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
@@ -33,7 +35,6 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.GXR806.envhealth.domain.model.LightLevel
 import com.GXR806.envhealth.domain.model.NoiseLevel
 import com.GXR806.envhealth.util.Constants
@@ -60,11 +61,7 @@ fun MonitorScreen(modifier: Modifier = Modifier) {
         if (isMonitoring) {
             MonitoringView()
         } else {
-            Text(
-                text = "请在首页开始监测",
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            com.GXR806.envhealth.ui.component.EmptyState("请在首页手动开始监测")
         }
     }
 }
@@ -195,13 +192,13 @@ private fun CurrentLightDisplay(frame: com.GXR806.envhealth.data.sensor.light.Li
             Row(verticalAlignment = Alignment.Bottom) {
                 Text(
                     text = String.format(Locale.US, "%.0f", frame.estimatedLux),
-                    fontSize = 72.sp,
+                    style = MaterialTheme.typography.displayMedium,
                     fontWeight = FontWeight.Bold,
                     color = getLightLevelColor(frame.level)
                 )
                 Text(
                     text = " lux",
-                    fontSize = 32.sp,
+                    style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Normal,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(bottom = 8.dp)
@@ -211,13 +208,13 @@ private fun CurrentLightDisplay(frame: com.GXR806.envhealth.data.sensor.light.Li
             Row(verticalAlignment = Alignment.Bottom) {
                 Text(
                     text = String.format(Locale.US, "%.0f", animatedBrightness),
-                    fontSize = 72.sp,
+                    style = MaterialTheme.typography.displayMedium,
                     fontWeight = FontWeight.Bold,
                     color = getLightLevelColor(frame.level)
                 )
                 Text(
                     text = "%",
-                    fontSize = 32.sp,
+                    style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Normal,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(bottom = 8.dp)
@@ -246,12 +243,13 @@ private fun CurrentLightDisplay(frame: com.GXR806.envhealth.data.sensor.light.Li
  */
 @Composable
 private fun LightLevelBadge(level: LightLevel, isDegradedMode: Boolean) {
-    val (text, color) = when (level) {
-        LightLevel.DARK -> "昏暗" to Color(0xFF424242)
-        LightLevel.DIM -> "较暗" to Color(0xFF757575)
-        LightLevel.MODERATE -> "适中" to Color(0xFFFFC107)
-        LightLevel.BRIGHT -> "明亮" to Color(0xFFFFEB3B)
+    val text = when (level) {
+        LightLevel.DARK -> "昏暗"
+        LightLevel.DIM -> "较暗"
+        LightLevel.MODERATE -> "适中"
+        LightLevel.BRIGHT -> "明亮"
     }
+    val color = getLightLevelColor(level)
 
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Card(
@@ -272,7 +270,7 @@ private fun LightLevelBadge(level: LightLevel, isDegradedMode: Boolean) {
             Text(
                 text = "降级模式（基于亮度估算）",
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
     }
@@ -364,13 +362,13 @@ private fun CurrentDbDisplay(db: Float, level: NoiseLevel) {
         Row(verticalAlignment = Alignment.Bottom) {
             Text(
                 text = String.format(Locale.US, "%.1f", animatedDb),
-                fontSize = 72.sp,
+                style = MaterialTheme.typography.displayMedium,
                 fontWeight = FontWeight.Bold,
                 color = getLevelColor(level)
             )
             Text(
                 text = " dB",
-                fontSize = 32.sp,
+                style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Normal,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(bottom = 8.dp)
@@ -393,13 +391,14 @@ private fun CurrentDbDisplay(db: Float, level: NoiseLevel) {
  */
 @Composable
 private fun NoiseLevelBadge(level: NoiseLevel) {
-    val (text, color) = when (level) {
-        NoiseLevel.QUIET -> "安静" to Color(0xFF4CAF50)
-        NoiseLevel.NORMAL -> "正常" to Color(0xFF8BC34A)
-        NoiseLevel.MODERATE -> "偏吵" to Color(0xFFFFC107)
-        NoiseLevel.LOUD -> "嘈杂" to Color(0xFFFF9800)
-        NoiseLevel.VERY_LOUD -> "非常吵" to Color(0xFFF44336)
+    val text = when (level) {
+        NoiseLevel.QUIET -> "安静"
+        NoiseLevel.NORMAL -> "正常"
+        NoiseLevel.MODERATE -> "偏吵"
+        NoiseLevel.LOUD -> "嘈杂"
+        NoiseLevel.VERY_LOUD -> "非常吵"
     }
+    val color = getLevelColor(level)
 
     Card(
         colors = CardDefaults.cardColors(
@@ -432,8 +431,10 @@ private fun RealTimeWaveform(
         }
     }
 
+    val lineColor = MaterialTheme.colorScheme.primary
+    val gridColor = MaterialTheme.colorScheme.outlineVariant
     Box(modifier = modifier) {
-        Canvas(modifier = Modifier.fillMaxSize()) {
+        Canvas(modifier = Modifier.fillMaxSize().semantics { contentDescription = "实时噪音曲线，当前 %.1f dB，估算值".format(currentDb) }) {
             val width = size.width
             val height = size.height
             val centerY = height / 2
@@ -452,13 +453,13 @@ private fun RealTimeWaveform(
 
                 drawPath(
                     path = path,
-                    color = Color(0xFF2196F3),
+                    color = lineColor,
                     style = Stroke(width = 4f)
                 )
             }
 
             drawLine(
-                color = Color.Gray.copy(alpha = 0.3f),
+                color = gridColor,
                 start = Offset(0f, centerY),
                 end = Offset(width, centerY),
                 strokeWidth = 1f
@@ -468,13 +469,13 @@ private fun RealTimeWaveform(
             val y60 = centerY - ((60f - 30f) / 50f - 0.5f) * height * 0.8f
             
             drawLine(
-                color = Color.Gray.copy(alpha = 0.2f),
+                color = gridColor,
                 start = Offset(0f, y40),
                 end = Offset(width, y40),
                 strokeWidth = 1f
             )
             drawLine(
-                color = Color.Gray.copy(alpha = 0.2f),
+                color = gridColor,
                 start = Offset(0f, y60),
                 end = Offset(width, y60),
                 strokeWidth = 1f
@@ -545,13 +546,13 @@ private fun StatisticsCards(
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(
-                    containerColor = Color(0xFFFF9800).copy(alpha = 0.1f)
+                    containerColor = MaterialTheme.colorScheme.errorContainer
                 )
             ) {
                 Text(
                     text = "⚠️ 检测到突发噪声",
                     modifier = Modifier.padding(16.dp),
-                    color = Color(0xFFFF9800),
+                    color = MaterialTheme.colorScheme.onErrorContainer,
                     fontWeight = FontWeight.Medium
                 )
             }
@@ -607,21 +608,16 @@ private fun StatCard(
     }
 }
 
-private fun getLevelColor(level: NoiseLevel): Color {
-    return when (level) {
-        NoiseLevel.QUIET -> Color(0xFF4CAF50)
-        NoiseLevel.NORMAL -> Color(0xFF8BC34A)
-        NoiseLevel.MODERATE -> Color(0xFFFFC107)
-        NoiseLevel.LOUD -> Color(0xFFFF9800)
-        NoiseLevel.VERY_LOUD -> Color(0xFFF44336)
-    }
+@Composable
+private fun getLevelColor(level: NoiseLevel): Color = when (level) {
+    NoiseLevel.QUIET, NoiseLevel.NORMAL -> MaterialTheme.colorScheme.primary
+    NoiseLevel.MODERATE -> MaterialTheme.colorScheme.secondary
+    NoiseLevel.LOUD, NoiseLevel.VERY_LOUD -> MaterialTheme.colorScheme.error
 }
 
-private fun getLightLevelColor(level: LightLevel): Color {
-    return when (level) {
-        LightLevel.DARK -> Color(0xFF424242)
-        LightLevel.DIM -> Color(0xFF757575)
-        LightLevel.MODERATE -> Color(0xFFFFC107)
-        LightLevel.BRIGHT -> Color(0xFFFFEB3B)
-    }
+@Composable
+private fun getLightLevelColor(level: LightLevel): Color = when (level) {
+    LightLevel.DARK, LightLevel.DIM -> MaterialTheme.colorScheme.onSurfaceVariant
+    LightLevel.MODERATE -> MaterialTheme.colorScheme.primary
+    LightLevel.BRIGHT -> MaterialTheme.colorScheme.secondary
 }

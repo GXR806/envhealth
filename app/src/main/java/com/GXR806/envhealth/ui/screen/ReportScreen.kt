@@ -1,5 +1,13 @@
 package com.GXR806.envhealth.ui.screen
 
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.animateIntAsState
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.foundation.layout.heightIn
+import com.GXR806.envhealth.ui.component.*
+import com.GXR806.envhealth.ui.viewmodel.HistoryViewModel
+import com.GXR806.envhealth.ui.viewmodel.HistoryUiState
+import com.GXR806.envhealth.domain.analysis.HistoryPeriod
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -61,94 +69,93 @@ import kotlin.math.roundToInt
 @Composable
 fun ReportScreen(
     viewModel: ReportViewModel,
+    historyViewModel: HistoryViewModel,
     modifier: Modifier = Modifier
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val currentSession by viewModel.currentSession.collectAsState()
     val latestReport by viewModel.latestReport.collectAsState()
     val latestAdvice by viewModel.latestAdvice.collectAsState()
-    
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .padding(16.dp)
+    val history by historyViewModel.state.collectAsState()
+    val period by historyViewModel.period.collectAsState()
+    var selectedId by rememberSaveable { mutableStateOf<Long?>(null) }
+    val data = (history as? HistoryUiState.Ready)?.data
+    val selected = data?.reports?.firstOrNull { it.report.id == selectedId }
+    // 维护、删除或范围变化使选中记录立即失效，不展示 remember 的旧报告。
+    androidx.compose.runtime.LaunchedEffect(data?.reports, history) {
+        if (selectedId != null && selected == null) selectedId = null
+    }
+    BackHandler(enabled = selected != null) { selectedId = null }
+    LazyColumn(
+        modifier = modifier.fillMaxSize().padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // 标题
-        Text(
-            text = "睡眠环境报告",
-            style = MaterialTheme.typography.headlineMedium,
-            fontWeight = FontWeight.Bold
-        )
-        
-        Spacer(modifier = Modifier.height(16.dp))
-        
-        // 会话控制区域
-        SessionControlSection(
-            currentSession = currentSession,
-            uiState = uiState,
-            onStartSession = { viewModel.startSleepSession() },
-            onEndSession = { viewModel.endSleepSession() },
-            onCancelSession = { viewModel.cancelSleepSession() }
-        )
-        
-        Spacer(modifier = Modifier.height(24.dp))
-        
-        // 报告显示区域
-        if (latestReport != null) {
-            LazyColumn(
-                verticalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                // 综合评分圆形图表
-                item {
-                    ScoreCircleCard(report = latestReport!!)
-                }
-                
-                // 三维评分卡片
-                item {
-                    ThreeDimensionScoreCard(report = latestReport!!)
-                }
-                
-                // 健康建议列表
-                item {
-                    Text(
-                        text = "健康建议",
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(vertical = 8.dp)
-                    )
-                }
-                
-                items(latestAdvice) { advice ->
-                    AdviceCard(advice = advice)
-                }
-                
-                // 空建议提示
-                if (latestAdvice.isEmpty()) {
-                    item {
-                        Text(
-                            text = "暂无建议",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(16.dp)
-                        )
+        if (selected != null) {
+            item { androidx.compose.material3.TextButton(onClick = { selectedId = null }, modifier = Modifier.heightIn(min = 48.dp)) { Text("返回报告列表") } }
+            item { Text("历史报告详情", style = MaterialTheme.typography.headlineMedium) }
+            item { Text("会话开始：${formatHistoryTimestamp(selected.timestamp)}") }
+            item { ScoreCircleCard(selected.report) }
+            item { ThreeDimensionScoreCard(selected.report) }
+            item { Text("历史报告仅展示持久评分和摘要；建议未关联报告，不混用当前建议。", style = MaterialTheme.typography.bodyMedium) }
+        } else {
+            item { Text("健康趋势与睡眠报告", style = MaterialTheme.typography.headlineMedium) }
+            item {
+                SessionControlSection(currentSession, uiState, viewModel::startSleepSession,
+                    viewModel::endSleepSession, viewModel::cancelSleepSession)
+            }
+            item {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    HistoryPeriod.entries.forEach { option ->
+                        androidx.compose.material3.FilterChip(selected = period == option,
+                            onClick = { historyViewModel.selectPeriod(option) },
+                            label = { Text(option.title) }, modifier = Modifier.weight(1f).heightIn(min = 48.dp))
                     }
                 }
             }
-        } else {
-            // 空状态
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = "暂无报告数据\n请开始一次睡眠监测",
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+            item {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    androidx.compose.material3.TextButton(onClick = { historyViewModel.move(-1) }, modifier = Modifier.weight(1f).heightIn(min = 48.dp)) { Text("上一范围") }
+                    androidx.compose.material3.TextButton(onClick = historyViewModel::today, modifier = Modifier.weight(1f).heightIn(min = 48.dp)) { Text("回到当前") }
+                    androidx.compose.material3.TextButton(onClick = { historyViewModel.move(1) }, modifier = Modifier.weight(1f).heightIn(min = 48.dp)) { Text("下一范围") }
+                }
             }
+            when (val current = history) {
+                HistoryUiState.Loading -> item { LoadingSkeleton() }
+                is HistoryUiState.Error -> item { ErrorState(current.message, historyViewModel::retry) }
+                is HistoryUiState.Ready -> {
+                    val charts = current.data.charts
+                    item { Text("${formatHistoryTimestamp(current.data.range.start)} 至 ${formatHistoryTimestamp(current.data.range.end)}（不含结束）", style = MaterialTheme.typography.bodySmall) }
+                    item { Text("噪音与光照特征采样只保留7天；耳机与报告保留90天。缺失不补零。", style = MaterialTheme.typography.bodySmall) }
+                    item { HistoryChart("噪音趋势", "估算值 dB · 桶内采样 Leq 算术均值", charts.noise) }
+                    item { HistoryChart("光照分布", "估算值 lux 区间 · 采样数量（次）", charts.light, bars = true) }
+                    item { HistoryChart("耳机时长", "已保存播放区间（估算值，分钟）", charts.headphone, bars = true, stacked = true) }
+                    item { HistoryChart("睡眠评分趋势", "综合评分（0–100）· 桶内报告均值", charts.sleep) }
+                    item { Text("历史报告", style = MaterialTheme.typography.titleLarge) }
+                    if (current.data.reports.isEmpty()) item { EmptyState("所选范围没有睡眠报告，请完成一次睡眠监测") }
+                    items(current.data.reports, key = { "历史-${it.report.id}" }) { timed ->
+                        Card(modifier = Modifier.fillMaxWidth().clickable { selectedId = timed.report.id }) {
+                            Column(Modifier.heightIn(min = 48.dp).padding(16.dp)) {
+                                Text(formatHistoryTimestamp(timed.timestamp), style = MaterialTheme.typography.titleMedium)
+                                Text("综合评分 ${timed.report.totalScore.roundToInt()} / 100 · 查看详情")
+                            }
+                        }
+                    }
+                }
+            }
+            item { Text("最新睡眠报告", style = MaterialTheme.typography.titleLarge) }
+            latestReport?.let { report ->
+                item { ScoreCircleCard(report) }
+                item { ThreeDimensionScoreCard(report) }
+                item { Text("健康建议", style = MaterialTheme.typography.titleLarge) }
+                items(latestAdvice) { AdviceCard(it) }
+                if (latestAdvice.isEmpty()) item { EmptyState("暂无建议") }
+            } ?: item { EmptyState("请开始并完成一次睡眠监测") }
         }
     }
 }
+
+private fun formatHistoryTimestamp(timestamp: Long): String = java.time.Instant.ofEpochMilli(timestamp)
+    .atZone(java.time.ZoneId.systemDefault()).format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"))
 
 /**
  * 会话控制区域
@@ -246,6 +253,7 @@ private fun ScoreCircleCard(
     report: SleepReport,
     modifier: Modifier = Modifier
 ) {
+    val animatedScore by animateIntAsState(report.totalScore.roundToInt(), label = "综合评分")
     Card(
         modifier = modifier.fillMaxWidth(),
         elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
@@ -268,13 +276,13 @@ private fun ScoreCircleCard(
                 modifier = Modifier
                     .size(150.dp)
                     .clip(CircleShape)
-                    .background(getScoreColor(report.totalScore))
+                    .background(MaterialTheme.colorScheme.primaryContainer)
             ) {
                 Text(
-                    text = "${report.totalScore.roundToInt()}",
+                    text = "$animatedScore",
                     style = MaterialTheme.typography.displayLarge,
                     fontWeight = FontWeight.Bold,
-                    color = Color.White
+                    color = MaterialTheme.colorScheme.onPrimaryContainer
                 )
             }
             
@@ -417,7 +425,13 @@ private fun AdviceCard(
                         fontWeight = FontWeight.Bold
                     )
                     Text(
-                        text = advice.category.name,
+                        text = when (advice.category) {
+                            com.GXR806.envhealth.domain.model.AdviceCategory.NOISE -> "噪音"
+                            com.GXR806.envhealth.domain.model.AdviceCategory.LIGHT -> "光照"
+                            com.GXR806.envhealth.domain.model.AdviceCategory.SLEEP -> "睡眠"
+                            com.GXR806.envhealth.domain.model.AdviceCategory.HEADPHONE -> "耳机"
+                            com.GXR806.envhealth.domain.model.AdviceCategory.GENERAL -> "综合健康"
+                        },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -448,12 +462,12 @@ private fun AdviceCard(
 
 // ========== 辅助函数 ==========
 
+@Composable
 private fun getScoreColor(score: Float): Color {
     return when {
-        score >= 80f -> Color(0xFF4CAF50)  // Green
-        score >= 60f -> Color(0xFFFFC107)  // Amber
-        score >= 40f -> Color(0xFFFF9800)  // Orange
-        else -> Color(0xFFF44336)  // Red
+        score >= 80f -> MaterialTheme.colorScheme.primary
+        score >= 60f -> MaterialTheme.colorScheme.secondary
+        else -> MaterialTheme.colorScheme.error
     }
 }
 

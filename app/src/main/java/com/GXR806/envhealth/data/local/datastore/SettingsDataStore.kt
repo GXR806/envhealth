@@ -16,9 +16,69 @@ import kotlinx.coroutines.flow.map
  * 应用设置数据存储
  * 使用 DataStore Preferences 保存用户配置
  */
-class SettingsDataStore(private val context: Context) {
+class SettingsDataStore(private val context: Context, private val injectedStore: DataStore<Preferences>? = null) {
     
+    val store: DataStore<Preferences> get() = injectedStore ?: context.dataStore
+    val snapshot: Flow<SettingsSnapshot> = store.data.map { p ->
+        SettingsSnapshot(
+            privacyConsentVersion = p[KEY_PRIVACY_CONSENT_VERSION] ?: 0,
+            noiseThresholdDb = p[KEY_NOISE_THRESHOLD_DB] ?: DEFAULT_NOISE_THRESHOLD_DB,
+            volumeThresholdPercent = p[KEY_VOLUME_THRESHOLD_PERCENT] ?: DEFAULT_VOLUME_THRESHOLD_PERCENT,
+            continuousListeningThresholdMinutes = p[KEY_CONTINUOUS_LISTENING_THRESHOLD_MINUTES] ?: DEFAULT_CONTINUOUS_LISTENING_THRESHOLD_MINUTES,
+            sleepStartHour = p[KEY_SLEEP_START_HOUR] ?: DEFAULT_SLEEP_START_HOUR,
+            sleepStartMinute = p[KEY_SLEEP_START_MINUTE] ?: DEFAULT_SLEEP_START_MINUTE,
+            sleepEndHour = p[KEY_SLEEP_END_HOUR] ?: DEFAULT_SLEEP_END_HOUR,
+            sleepEndMinute = p[KEY_SLEEP_END_MINUTE] ?: DEFAULT_SLEEP_END_MINUTE,
+            dbCalibrationOffset = p[KEY_DB_CALIBRATION_OFFSET] ?: DEFAULT_DB_CALIBRATION_OFFSET,
+            backgroundMonitoringEnabled = p[KEY_BACKGROUND_MONITORING_ENABLED] ?: false,
+            baselineVersion = p[KEY_BASELINE_VERSION] ?: 0L,
+            maintenanceState = p[KEY_MAINTENANCE_STATE] ?: "",
+            lastCleanupTimestamp = p[KEY_LAST_CLEANUP_TIMESTAMP] ?: 0L,
+            themeMode = p[KEY_THEME_MODE]?.takeIf { it in setOf(
+                SettingsSnapshot.THEME_MODE_SYSTEM, SettingsSnapshot.THEME_MODE_LIGHT, SettingsSnapshot.THEME_MODE_DARK
+            ) } ?: SettingsSnapshot.THEME_MODE_SYSTEM
+        )
+    }
+
+    suspend fun setThemeMode(mode: String) {
+        require(mode in setOf(
+            SettingsSnapshot.THEME_MODE_SYSTEM,
+            SettingsSnapshot.THEME_MODE_LIGHT,
+            SettingsSnapshot.THEME_MODE_DARK
+        ))
+        store.edit { it[KEY_THEME_MODE] = mode }
+    }
+
+    suspend fun setQuietTimes(startHour: Int, startMinute: Int, endHour: Int, endMinute: Int) {
+        require(startHour in 0..23 && endHour in 0..23 && startMinute in 0..59 && endMinute in 0..59)
+        store.edit {
+            it[KEY_SLEEP_START_HOUR] = startHour; it[KEY_SLEEP_START_MINUTE] = startMinute
+            it[KEY_SLEEP_END_HOUR] = endHour; it[KEY_SLEEP_END_MINUTE] = endMinute
+        }
+    }
+
+    suspend fun setMaintenanceState(state: String) {
+        require(state in setOf("", "clearing", "error"))
+        store.edit { it[KEY_MAINTENANCE_STATE] = state }
+    }
+
+    /** Room 清除成功且所有 writer 已停止后调用；设置/反馈恢复默认，后台明确关闭。 */
+    suspend fun resetAll() {
+        store.edit { it.clear(); it[KEY_BACKGROUND_MONITORING_ENABLED] = false }
+    }
+
+    suspend fun acceptPrivacyPolicy() {
+        store.edit {
+            check((it[KEY_MAINTENANCE_STATE] ?: "").isEmpty()) { "数据维护未完成" }
+            it[KEY_PRIVACY_CONSENT_VERSION] = SettingsSnapshot.PRIVACY_POLICY_VERSION
+        }
+    }
+
     companion object {
+        private val KEY_PRIVACY_CONSENT_VERSION = intPreferencesKey("privacy_consent_version")
+        private val KEY_THEME_MODE = androidx.datastore.preferences.core.stringPreferencesKey("theme_mode")
+        private val KEY_BASELINE_VERSION = longPreferencesKey("reminder_baseline_version")
+        private val KEY_MAINTENANCE_STATE = androidx.datastore.preferences.core.stringPreferencesKey("maintenance_state")
         private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "settings")
         
         // 噪音监测设置
@@ -73,141 +133,149 @@ class SettingsDataStore(private val context: Context) {
     }
     
     // 噪音阈值（dB，估算值）
-    val noiseThresholdDb: Flow<Float> = context.dataStore.data
+    val noiseThresholdDb: Flow<Float> = store.data
         .map { preferences -> preferences[KEY_NOISE_THRESHOLD_DB] ?: DEFAULT_NOISE_THRESHOLD_DB }
     
     suspend fun setNoiseThresholdDb(value: Float) {
-        context.dataStore.edit { preferences ->
+        require(value.isFinite() && value in 40f..90f)
+        store.edit { preferences ->
             preferences[KEY_NOISE_THRESHOLD_DB] = value
+            preferences[KEY_BASELINE_VERSION] = (preferences[KEY_BASELINE_VERSION] ?: 0L) + 1L
         }
     }
     
     // 噪音监测开关
-    val noiseMonitoringEnabled: Flow<Boolean> = context.dataStore.data
+    val noiseMonitoringEnabled: Flow<Boolean> = store.data
         .map { preferences -> preferences[KEY_NOISE_MONITORING_ENABLED] ?: false }
     
     suspend fun setNoiseMonitoringEnabled(enabled: Boolean) {
-        context.dataStore.edit { preferences ->
+        store.edit { preferences ->
             preferences[KEY_NOISE_MONITORING_ENABLED] = enabled
         }
     }
     
     // 音量阈值百分比（0-100）
-    val volumeThresholdPercent: Flow<Float> = context.dataStore.data
+    val volumeThresholdPercent: Flow<Float> = store.data
         .map { preferences -> preferences[KEY_VOLUME_THRESHOLD_PERCENT] ?: DEFAULT_VOLUME_THRESHOLD_PERCENT }
     
     suspend fun setVolumeThresholdPercent(value: Float) {
-        context.dataStore.edit { preferences ->
+        require(value.isFinite() && value in 20f..80f)
+        store.edit { preferences ->
             preferences[KEY_VOLUME_THRESHOLD_PERCENT] = value
+            preferences[KEY_BASELINE_VERSION] = (preferences[KEY_BASELINE_VERSION] ?: 0L) + 1L
         }
     }
     
     // 连续收听时长阈值（分钟）
-    val continuousListeningThresholdMinutes: Flow<Int> = context.dataStore.data
+    val continuousListeningThresholdMinutes: Flow<Int> = store.data
         .map { preferences -> preferences[KEY_CONTINUOUS_LISTENING_THRESHOLD_MINUTES] ?: DEFAULT_CONTINUOUS_LISTENING_THRESHOLD_MINUTES }
     
     suspend fun setContinuousListeningThresholdMinutes(value: Int) {
-        context.dataStore.edit { preferences ->
+        require(value in 15..90)
+        store.edit { preferences ->
             preferences[KEY_CONTINUOUS_LISTENING_THRESHOLD_MINUTES] = value
+            preferences[KEY_BASELINE_VERSION] = (preferences[KEY_BASELINE_VERSION] ?: 0L) + 1L
         }
     }
     
     // 音量监测开关
-    val volumeMonitoringEnabled: Flow<Boolean> = context.dataStore.data
+    val volumeMonitoringEnabled: Flow<Boolean> = store.data
         .map { preferences -> preferences[KEY_VOLUME_MONITORING_ENABLED] ?: false }
     
     suspend fun setVolumeMonitoringEnabled(enabled: Boolean) {
-        context.dataStore.edit { preferences ->
+        store.edit { preferences ->
             preferences[KEY_VOLUME_MONITORING_ENABLED] = enabled
         }
     }
     
     // 睡眠开始时间（小时）
-    val sleepStartHour: Flow<Int> = context.dataStore.data
+    val sleepStartHour: Flow<Int> = store.data
         .map { preferences -> preferences[KEY_SLEEP_START_HOUR] ?: DEFAULT_SLEEP_START_HOUR }
     
     suspend fun setSleepStartHour(value: Int) {
-        context.dataStore.edit { preferences ->
+        store.edit { preferences ->
             preferences[KEY_SLEEP_START_HOUR] = value
         }
     }
     
     // 睡眠开始时间（分钟）
-    val sleepStartMinute: Flow<Int> = context.dataStore.data
+    val sleepStartMinute: Flow<Int> = store.data
         .map { preferences -> preferences[KEY_SLEEP_START_MINUTE] ?: DEFAULT_SLEEP_START_MINUTE }
     
     suspend fun setSleepStartMinute(value: Int) {
-        context.dataStore.edit { preferences ->
+        store.edit { preferences ->
             preferences[KEY_SLEEP_START_MINUTE] = value
         }
     }
     
     // 睡眠结束时间（小时）
-    val sleepEndHour: Flow<Int> = context.dataStore.data
+    val sleepEndHour: Flow<Int> = store.data
         .map { preferences -> preferences[KEY_SLEEP_END_HOUR] ?: DEFAULT_SLEEP_END_HOUR }
     
     suspend fun setSleepEndHour(value: Int) {
-        context.dataStore.edit { preferences ->
+        store.edit { preferences ->
             preferences[KEY_SLEEP_END_HOUR] = value
         }
     }
     
     // 睡眠结束时间（分钟）
-    val sleepEndMinute: Flow<Int> = context.dataStore.data
+    val sleepEndMinute: Flow<Int> = store.data
         .map { preferences -> preferences[KEY_SLEEP_END_MINUTE] ?: DEFAULT_SLEEP_END_MINUTE }
     
     suspend fun setSleepEndMinute(value: Int) {
-        context.dataStore.edit { preferences ->
+        store.edit { preferences ->
             preferences[KEY_SLEEP_END_MINUTE] = value
         }
     }
     
     // 睡眠监测开关
-    val sleepMonitoringEnabled: Flow<Boolean> = context.dataStore.data
+    val sleepMonitoringEnabled: Flow<Boolean> = store.data
         .map { preferences -> preferences[KEY_SLEEP_MONITORING_ENABLED] ?: false }
     
     suspend fun setSleepMonitoringEnabled(enabled: Boolean) {
-        context.dataStore.edit { preferences ->
+        store.edit { preferences ->
             preferences[KEY_SLEEP_MONITORING_ENABLED] = enabled
         }
     }
     
     // 分贝校准偏移
-    val dbCalibrationOffset: Flow<Float> = context.dataStore.data
+    val dbCalibrationOffset: Flow<Float> = store.data
         .map { preferences -> preferences[KEY_DB_CALIBRATION_OFFSET] ?: DEFAULT_DB_CALIBRATION_OFFSET }
     
     suspend fun setDbCalibrationOffset(value: Float) {
-        context.dataStore.edit { preferences ->
+        require(value.isFinite() && value in 0f..120f)
+        store.edit { preferences ->
             preferences[KEY_DB_CALIBRATION_OFFSET] = value
         }
     }
     
     // Lux 估算系数
-    val luxEstimationFactor: Flow<Float> = context.dataStore.data
+    val luxEstimationFactor: Flow<Float> = store.data
         .map { preferences -> preferences[KEY_LUX_ESTIMATION_FACTOR] ?: DEFAULT_LUX_ESTIMATION_FACTOR }
     
     suspend fun setLuxEstimationFactor(value: Float) {
-        context.dataStore.edit { preferences ->
+        store.edit { preferences ->
             preferences[KEY_LUX_ESTIMATION_FACTOR] = value
         }
     }
     
     // 后台监测总开关
-    val backgroundMonitoringEnabled: Flow<Boolean> = context.dataStore.data
+    val backgroundMonitoringEnabled: Flow<Boolean> = store.data
         .map { preferences -> preferences[KEY_BACKGROUND_MONITORING_ENABLED] ?: false }
     
     suspend fun setBackgroundMonitoringEnabled(enabled: Boolean) {
-        context.dataStore.edit { preferences ->
+        store.edit { preferences ->
+            if (enabled) check(preferences[KEY_PRIVACY_CONSENT_VERSION] == SettingsSnapshot.PRIVACY_POLICY_VERSION && (preferences[KEY_MAINTENANCE_STATE] ?: "").isEmpty()) { "请先同意隐私说明" }
             preferences[KEY_BACKGROUND_MONITORING_ENABLED] = enabled
         }
     }
     
     // 上次清理时间戳
-    val lastCleanupTimestamp: Flow<Long> = context.dataStore.data
+    val lastCleanupTimestamp: Flow<Long> = store.data
         .map { preferences -> preferences[KEY_LAST_CLEANUP_TIMESTAMP] ?: 0L }
     
     suspend fun setLastCleanupTimestamp(value: Long) {
-        context.dataStore.edit { preferences ->
+        store.edit { preferences ->
             preferences[KEY_LAST_CLEANUP_TIMESTAMP] = value
         }
     }

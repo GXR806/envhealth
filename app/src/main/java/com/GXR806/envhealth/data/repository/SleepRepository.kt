@@ -160,6 +160,12 @@ class SleepRepository(
         sleepReportDao.deleteAll()
     }
     
+    /** 只读历史报告与会话开始时间，未增加数据库列。 */
+    fun getHistory(start: Long, end: Long): Flow<List<com.GXR806.envhealth.domain.analysis.TimedReport>> =
+        sleepReportDao.getHistory(start, end).map { rows -> rows.map { row ->
+            com.GXR806.envhealth.domain.analysis.TimedReport(row.sessionStartTime, row.report.toDomain())
+        } }
+
     // ========== Entity <-> Domain 转换 ==========
     
     private fun SleepSession.toEntity(): SleepSessionEntity {

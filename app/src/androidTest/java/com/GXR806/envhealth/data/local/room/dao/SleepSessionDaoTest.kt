@@ -5,7 +5,7 @@ import androidx.test.core.app.ApplicationProvider
 import com.GXR806.envhealth.data.local.room.EnvHealthDatabase
 import com.GXR806.envhealth.data.local.room.entity.SleepSessionEntity
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Before
 import org.junit.Test
@@ -36,7 +36,7 @@ class SleepSessionDaoTest {
     }
     
     @Test
-    fun insertSession_andRetrieveById_success() = runTest {
+    fun insertSession_andRetrieveById_success() = runBlocking {
         // Given
         val session = SleepSessionEntity(
             startTime = 1000L,
@@ -57,7 +57,7 @@ class SleepSessionDaoTest {
     }
     
     @Test
-    fun updateSession_success() = runTest {
+    fun updateSession_success() = runBlocking {
         // Given
         val session = SleepSessionEntity(
             startTime = 1000L,
@@ -79,7 +79,7 @@ class SleepSessionDaoTest {
     }
     
     @Test
-    fun getOngoingSessions_returnsOnlyOngoing() = runTest {
+    fun getOngoingSessions_returnsOnlyOngoing() = runBlocking {
         // Given
         val sessions = listOf(
             SleepSessionEntity(startTime = 1000L, endTime = null, type = "MANUAL", status = "ONGOING"),
@@ -97,7 +97,7 @@ class SleepSessionDaoTest {
     }
     
     @Test
-    fun getSessionsByTimeRange_success() = runTest {
+    fun getSessionsByTimeRange_success() = runBlocking {
         // Given
         val sessions = listOf(
             SleepSessionEntity(startTime = 1000L, endTime = 2000L, type = "MANUAL", status = "COMPLETED"),
@@ -116,7 +116,7 @@ class SleepSessionDaoTest {
     }
     
     @Test
-    fun getCountByTimeRange_returnsCorrectValue() = runTest {
+    fun getCountByTimeRange_returnsCorrectValue() = runBlocking {
         // Given
         val sessions = listOf(
             SleepSessionEntity(startTime = 1000L, endTime = 2000L, type = "MANUAL", status = "COMPLETED"),
@@ -133,7 +133,7 @@ class SleepSessionDaoTest {
     }
     
     @Test
-    fun deleteBeforeTime_removesOldData() = runTest {
+    fun deleteBeforeTime_removesOldData() = runBlocking {
         // Given
         val sessions = listOf(
             SleepSessionEntity(startTime = 1000L, endTime = 2000L, type = "MANUAL", status = "COMPLETED"),

@@ -15,6 +15,13 @@ class HeadphoneRepository(
     private val headphoneUsageDao: HeadphoneUsageDao
 ) {
     
+    /** 已完成重叠区间；裁剪与分桶由纯 Kotlin 聚合器处理。 */
+    fun getOverlapping(start: Long, end: Long): Flow<List<HeadphoneUsage>> =
+        headphoneUsageDao.getOverlapping(start, end).map { rows -> rows.map { it.toDomain() } }
+
+    suspend fun getCompletedIntervals(): List<HeadphoneUsage> =
+        headphoneUsageDao.getCompletedIntervals().map { it.toDomain() }
+
     /**
      * 插入耳机使用记录
      */

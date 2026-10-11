@@ -4,6 +4,43 @@ plugins {
     alias(libs.plugins.ksp)
 }
 
+// 原稿保留在仓库 artwork；只在构建目录生成资源，不解码、缩放或改写原图。
+val launcherArtwork = rootProject.layout.projectDirectory.file("artwork/app_icon.png")
+val validateLauncherArtwork = tasks.register("validateLauncherArtwork") {
+    val artworkFile = launcherArtwork.asFile
+    inputs.file(artworkFile).optional()
+    doLast {
+        check(artworkFile.isFile) {
+            "应用图标原稿缺失：请保留项目根目录 artwork/app_icon.png 后重新构建。"
+        }
+    }
+}
+abstract class LauncherArtworkCopy : Copy() {
+    @get:org.gradle.api.tasks.OutputDirectory
+    abstract val resourceDirectory: org.gradle.api.file.DirectoryProperty
+}
+
+val generateLauncherArtwork = tasks.register<LauncherArtworkCopy>("generateLauncherArtwork") {
+    dependsOn(validateLauncherArtwork)
+    from(launcherArtwork) {
+        into("drawable-nodpi")
+        rename { "ic_app_artwork.png" }
+    }
+    resourceDirectory.set(layout.buildDirectory.dir("generated/launcherArtwork/res"))
+    into(resourceDirectory)
+}
+
+tasks.named("preBuild") {
+    dependsOn(generateLauncherArtwork)
+}
+
+// AGP 9 的 Variant Sources API 将生成目录用于所有 variant，并携带任务依赖。
+androidComponents.onVariants { variant ->
+    variant.sources.res?.addGeneratedSourceDirectory(generateLauncherArtwork) {
+        it.resourceDirectory
+    }
+}
+
 android {
     namespace = "com.GXR806.envhealth"
     compileSdk = 34
@@ -13,25 +50,55 @@ android {
         minSdk = 26
         targetSdk = 34
         versionCode = 1
-        versionName = "1.0"
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        versionName = "1.0.0"
+        testInstrumentationRunner = "com.GXR806.envhealth.IsolatedTestRunner"
     }
 
-    buildTypes {
-        release {
-            isMinifyEnabled = false
+    // 可选生产签名：不读取或打印密钥，不回退debug key；未配置时输出unsigned。
+    val signingVars = listOf("STORE_FILE", "STORE_PASSWORD", "KEY_ALIAS", "KEY_PASSWORD")
+    val signingValues = signingVars.map { providers.environmentVariable(it).orNull }
+    if (signingValues.any { it != null }) {
+        require(signingValues.all { !it.isNullOrBlank() }) {
+            "可选release签名需同时设置 STORE_FILE/STORE_PASSWORD/KEY_ALIAS/KEY_PASSWORD；不要提交秘密。"
+        }
+        val keyFile = rootProject.file(signingValues[0]!!)
+        require(keyFile.isFile) { "STORE_FILE不存在；请提供本地生产keystore路径，或取消全部签名环境变量以构建unsigned。" }
+        signingConfigs.create("optionalRelease") {
+            storeFile = keyFile
+            storePassword = signingValues[1]
+            keyAlias = signingValues[2]
+            keyPassword = signingValues[3]
         }
     }
-    compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
+    buildTypes {
+        debug {
+            enableUnitTestCoverage = true
+        }
+        release {
+            signingConfig = signingConfigs.findByName("optionalRelease")
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
+        }
+    }
+
+    // AGP 内置 JaCoCo：仅用于 debug 单测/测试覆盖率，不影响 release 产物。
+    testOptions {
+        unitTests.isReturnDefaultValues = true
     }
     buildFeatures {
         compose = true
         buildConfig = true
     }
-    testOptions {
-        unitTests.isReturnDefaultValues = true
+    testCoverage {
+        jacocoVersion = "0.8.12"
+    }
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_11
+        targetCompatibility = JavaVersion.VERSION_11
     }
 }
 
@@ -67,6 +134,7 @@ dependencies {
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.androidx.room.testing)
+    androidTestImplementation("androidx.work:work-testing:2.9.1")
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     androidTestImplementation(libs.androidx.espresso.core)
