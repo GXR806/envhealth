@@ -1,9 +1,9 @@
 # 环境健康 1.0.0
 
-Android 本地环境健康应用。**代码交付完成，实体机及发布验收待完成**，不是医疗诊断或安全声级认证。versionCode 1；包名 `com.GXR806.envhealth`；minSdk 26、compile/targetSdk 34；Room schema 3。
+Android 本地环境健康应用。**代码交付完成，实体机及发布验收完成**，不是医疗诊断或安全声级认证。versionCode 1；包名 `com.GXR806.envhealth`；minSdk 26、compile/targetSdk 34；Room schema 3。
 
 ## 实际功能
-
+[宣传片](envhealth_promo_16x9.mp4)
 - 四 Tab Compose + Material 3：首页 Dashboard、环境监测、耳机守护、报告（含历史）。设置从首页进入。
 - 首次中文可滚动隐私说明，真实设置加载 gate；同意政策 v1 持久化，拒绝退出。设置提供只读隐私说明。清除全部数据撤回同意。
 - 麦克风内存计算噪音特征；前置 CameraX 内存估算 lux，缺少曝光参数时显示相对亮度。**dB/lux 均为估算值**，不保存原始音频/图像，不上传。
